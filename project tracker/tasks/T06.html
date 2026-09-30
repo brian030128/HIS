@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T06 斗六分院與成大醫院 Phase-1 上線 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · deploy</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T06</div>
+  <h1>斗六分院與成大醫院 Phase-1 上線</h1>
+  <p class="lede">第 300 天前，把改寫後的 C# HIS 在斗六分院與成大醫院正式上線，取代 VB.Net 版——這是 50% 付款的驗收條件。HIS 不能中斷（貳-三-4），所以不是「切換」而是「兩套並存、逐步搬移、隨時可退」。我們的核心主張：<strong>資料庫不動、只換應用層</strong>，切換單位是工作站／科室，回退動作是改一張設定表。做不到這點，任何 cutover 策略都是賭博。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 · 300 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（client 端讀卡機、印表機、標籤機）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 40 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> <a href="./T02.html">T02</a> <a href="./T03.html">T03</a> <a href="./T04.html">T04</a> <a href="./T05.html">T05</a> <a href="./M01.html">M01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T16.html">T16</a> <a href="./T08.html">T08</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(一)-5、貳-三-2、貳-三-4、貳-三-5、伍-三-8</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(一)-5：「以上開發範圍於整合測試完成後，廠商應安排先行於斗六分院與成大醫院上線使用。」</p>
+    <p>貳-三-2：「…提交『導入步驟工作書』、『測試步驟工作書』、『上線前檢核清單』、『緊急復原工作書』供本院確認。」</p>
+    <p>貳-三-4：「HIS 服務不能中斷，需求調整亦需持續上版，得標廠商必須提供規劃以確保新舊版本功能一致。」</p>
+    <p>貳-三-5：「程式調整完成後，需模擬新版本運作環境進行完整測試，並與本院使用者及資訊人員共同測試。」</p>
+    <p>伍-三-8：「上線前應清除正式環境之測試資料與帳號及管理資料與帳號。」</p>
+    <p>三階段表：第一階段交付「程式設計書、測試報告書、原始程式碼（電子檔）」，決標次日起 300 天內，付款 50%。</p>
+  </blockquote>
+  <p>規格沒說：上線順序（斗六先或成醫先）、是否允許並存期、client 部署方式、測試環境誰出、Phase-1 上線時成醫現有的院內介接（LIS、PACS、MIS…）是否要全數驗證。最後一項是最大的隱藏範圍——X01 寫的是老醫的介接測試，但成醫切到 C# 那天，成醫現有的每一條介接都得照常運作。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>並存架構：VB.Net 後端與 C# WCF 後端同時對同一顆 HIS DB 服務，client 端由 launcher 依「工作站→版本」設定表決定啟動舊版或新版。這使切換粒度可以細到單一工作站，回退不涉及資料。</p>
+  <pre class="diagram">
+                    成醫 + 斗六 HIS DB（Phase-1 期間不搬、不改型別、只允許新增）
+                              ▲                          ▲
+              ┌───────────────┘                          └───────────────┐
+   ┌──────────┴──────────┐                                    ┌──────────┴──────────┐
+   │ VB.Net 後端 / WCF     │   ◀── 同一份資料、兩套應用層 ──▶       │ C# 後端 / WCF          │
+   │ (院方現行，逐步縮減)   │                                    │ HTTP + HTTPS (T04)     │
+   └──────────▲──────────┘                                    └──────────▲──────────┘
+              │ 舊 client                                                │ 新 client
+   ┌──────────┴────────────────────────────────────────────────────────┴──────────┐
+   │ Client PC（成醫數千台、斗六數百台）                                             │
+   │ launcher 讀「工作站／科室 → 版本」設定表（擴充 PCS_Ip_Config，T02）              │
+   │ 讀卡機 / 印表機 / 標籤機 驅動兩版共用；.NET runtime 預先佈署                      │
+   └──────────────────────────────────────────────────────────────────────────────┘
+
+   Wave 0  測試環境（DB 複本 + C# 後端 + 20 台代表性 client）— 整合測試 + UAT
+   Wave 1  斗六分院 全院（先導：規模小、流程完整、與成醫共用碼但院區參數不同）
+   Wave 2  成醫 門診（掛號→批價→藥局 一條龍，週末切、週一守）
+   Wave 3  成醫 急診（24h 科別，切換窗最難找，需夜間切）
+   Wave 4  成醫 住院（醫囑、護理、給藥，資料最複雜）
+   Wave 5  VB.Net 停用 → 進入 hypercare 4 週 → 驗收
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>cutover 策略比較</strong>：(a) <em>大爆炸週末</em>：一次全換，回退也是一次全退；對 3,900 支程式與數千台 PC 太危險，否決。(b) <em>平行運行</em>：使用者兩套都打，資料會重複，臨床不可能接受，否決。(c) <em>先導科室</em>：好，但單一科室不能驗證跨系統流程。(d) <em>依模組分波</em>：門診→急診→住院，每波內部流程完整，波與波之間靠同一顆 DB 互通。我們採 (c)+(d)：斗六全院當先導，成醫依模組分波。</li>
+    <li><strong>資料相容性</strong>：Phase-1 期間 C# 新增的表（T02 的設定表）與欄位只允許「additive」，禁止改型別、刪欄、改 stored procedure 語意；C# 寫進去的資料 VB 必須讀得懂（T05 的 golden output 比對即是驗證）。這是回退可行的前提。</li>
+    <li><strong>回退計畫（緊急復原工作書）</strong>：三個層級。L1 單工作站回退：改設定表、重啟 launcher，5 分鐘。L2 整波回退：設定表批次更新 + 通知該科，30 分鐘內。L3 全院回退：所有工作站指回 VB、C# 後端停止，1 小時內；前提是 VB 後端在 hypercare 結束前不下線。定義「不可回退點」：VB 後端下線後，或任何非 additive 的 DB 變更執行後。</li>
+    <li><strong>Client 佈署</strong>：院方現行更新機制<strong>規格未載明，需確認</strong>（ClickOnce？自製 launcher？群組原則？）。無論何者，.NET runtime、C# client 程式與 WCF 端點設定需在切換前一週預佈到所有 PC（「預佈、後啟用」），切換當天只改設定表。需要院方 PC 清單（工作站代碼、科室、OS 版本、外接設備）。</li>
+    <li><strong>測試環境（Wave 0）</strong>：DB 複本（近期正式資料，去識別化程度需與院方談）、C# 應用伺服器、VB 後端一份（做並存與 golden output）、20 台代表性 client（含讀卡機、處方箋印表機、藥袋標籤機、條碼機）、健保測試卡與測試 VPN、現有院內介接對象的測試端（LIS、PACS、MIS 至少要有）。院方出硬體（貳-二-(三)），我們出建置與腳本。</li>
+    <li><strong>整合測試與 UAT</strong>：依貳-三-5 需與使用者及資訊人員共同測試。以子系統為單位（共 67 個）寫測試腳本，每個子系統至少一位院方 key user 簽認；門診、批價、藥局、住院醫囑、健保申報五個高風險模組做端到端劇本測試。</li>
+    <li><strong>上線前檢核清單</strong>：T05 登錄簿全數已回歸、凍結窗已生效、伍-三-8 測試帳號與資料清除、弱掃結果（M03）、回退演練已做過一次、war room 名單與叫修專線。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>整合測試腳本撰寫與執行（67 子系統 × 兩院區參數，約 12 人月）；UAT 協調與缺陷追蹤（6 人月）；client 打包、預佈工具與 PC 盤點（4 人月）；cutover 計畫、四份工作書中與上線相關的三份、回退演練（6 人月）；五波切換每波 2–3 人現場守 1–2 週（8 人月）；hypercare 兩院各 4 週（4 人月）。合計約 40 人月。若成醫現有院內介接必須在 Phase-1 逐條驗證（很可能），要再加 6–10 人月，這部分應與 X01 合併估。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>醫院作業節奏</strong>：門診切換選週末、急診沒有低峰只有相對低峰（凌晨 2–5 點）、住院切換要避開月底健保申報與月初結算；月底／月初批次（262 支）跑的時候不能切。</li>
+    <li><strong>健保 IC 卡與申報連續性</strong>：切換當天讀卡、寫卡、就醫序號、每日上傳不能斷；VB 與 C# 若同時對同一台讀卡機／同一張卡操作要有互斥。</li>
+    <li><strong>批價與藥局的零容錯</strong>：批價金額、藥袋內容一旦不一致會直接影響病人與健保核刪，這兩個模組的 golden output 比對必須 100% 一致才能切。</li>
+    <li><strong>斗六與成醫的院區差異</strong>：斗六先導的價值在於驗證 T02 參數化——同一份碼、不同院區設定。若斗六其實有獨立分支程式（<strong>需確認</strong>），先導的代表性會打折。</li>
+    <li><strong>成醫現有介接</strong>：LIS、PACS、MIS、電子病歷等現有介接在 C# 版上的行為必須與 VB 版一致，這需要各介接原廠配合測試，而規格只承諾提供「標準介接說明」。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 上線的標的物本身；T01 未完成的子系統無法進入整合測試。上線波次順序（門診→急診→住院）應反過來約束 T01 的改寫順序。</li>
+    <li><a href="./T02.html">T02</a> — 斗六與成醫用同一份碼靠院區參數區分；「工作站→版本」切換表也建在 T02 擴充的 PCS_Ip_Config 上。</li>
+    <li><a href="./T03.html">T03</a> — 效能不得低於 VB 版；上線前檢核要有壓測結果（門診尖峰掛號、批價）。</li>
+    <li><a href="./T04.html">T04</a> — SQL 移後端與 HTTPS 改變部署拓樸（憑證、防火牆、WCF 端點），必須在測試環境先驗證。</li>
+    <li><a href="./T05.html">T05</a> — 凍結窗與登錄簿「全數已回歸」是上線門檻；並存期間的資料相容性靠 golden output 比對證明。</li>
+    <li><a href="./M01.html">M01</a> — 導入步驟工作書、測試步驟工作書、上線前檢核清單、緊急復原工作書四份都在上線前要院方確認。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T16.html">T16</a> — 成醫與斗六必須先站在 C# 版上，老醫版本才能「回饋」；Phase-1 的並存架構與 launcher 切換表在 Phase-3 直接重用。</li>
+    <li><a href="./T08.html">T08</a> — 數據整合中台的 CDC／Replication 來源是 Phase-1 上線後的正式 DB，其 schema 與寫入行為由 C# 版定義。</li>
+    <li>驗收付款 50% 直接掛在本任務。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>不開發新的設備介接，但 client 端既有周邊必須在 C# client 上照常運作，且測試環境要有實體設備。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>健保 IC 卡讀卡機</td><td>CSHIS DLL（健保署 API）、就醫序號、每日上傳</td><td>健保署；院方現行呼叫方式由 HIS 組提供</td><td>測試讀卡機、測試 IC 卡與醫事人員卡、健保測試 VPN</td></tr>
+      <tr><td>處方箋／收據印表機、藥袋標籤機、條碼機</td><td>Windows 列印、ESC/POS 或原廠 DLL（未確認）</td><td>院方設備清單與現行驅動</td><td>每種機型至少一台在測試環境</td></tr>
+      <tr><td>院內既有介接（LIS、PACS、MIS、電子病歷等）</td><td>HL7、DB view、Web service（各系統不同）</td><td>各系統原廠與院方對口單位</td><td>各系統測試端；規格僅承諾「標準介接說明」</td></tr>
+      <tr><td>Client PC 群（數千台）</td><td>launcher／ClickOnce／GPO（未確認）</td><td>資訊室（PC 管理單位）</td><td>PC 盤點清單、預佈權限、.NET runtime 版本</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>現行<strong>部署拓樸與 client 更新機制</strong>：WCF 主機清單、launcher／更新方式、斗六與成醫是否同 DB 同碼</td><td>資訊室 HIS 組、DC 組</td><td>決定並存架構是否可行；若斗六是獨立分支或 client 無集中更新機制，整個 cutover 設計要重做。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>測試環境</strong>：DB 複本、應用伺服器、20 台代表性 client 與周邊設備，第 3 個月前到位</td><td>資訊室 DC 組</td><td>貳-三-5 要求模擬新版本環境完整測試；沒有環境，T01 的產出無法整合測試，300 天上線不可能。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>院方書面同意<strong>「並存期＋依波次切換」策略</strong>與 VB 後端在 hypercare 結束前不下線</td><td>資訊室主管、專案管理人</td><td>回退計畫的前提；若院方要求一次切換，風險要由院方書面承擔。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>成醫、斗六<strong>現有院內／院外介接清單</strong>及各原廠聯絡窗口與測試端</td><td>資訊室 HIS 組</td><td>Phase-1 隱藏範圍；每條介接都要在 C# 版驗證，原廠不配合就無法切該模組。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><strong>PC 盤點清單</strong>（工作站代碼、科室、OS、.NET 版本、外接設備）與預佈權限</td><td>資訊室（PC 管理）、各使用單位</td><td>數千台 PC 要在切換前一週預佈完成；沒有清單就沒有波次規劃。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>每個子系統的<strong>院方 key user 名單</strong>與 UAT 時段承諾</td><td>各使用單位主管（掛號、批價、藥局、護理部、急診）</td><td>貳-三-5 要求共同測試；沒有 key user 簽認，測試報告書不能結案。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>健保測試卡、測試讀卡機、健保測試 VPN 申請</td><td>資訊室 HIS 組 → 健保署</td><td>健保署申請有前置期；沒有測試卡無法驗證 IC 卡流程。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>切換窗口的院方核准：門診週末、急診凌晨、住院避開申報期</td><td>醫務部／各科主任、資訊室</td><td>切換時段影響臨床，需要院方高層核准與公告。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>T01 進度就是上線進度</strong> — 300 天要改寫 3,900 支程式再整合測試，若 T01 在第 220 天前未完成 90% 以上，整合測試與五波切換擠不進剩下時間。這是全專案最大的排程風險。</li>
+    <li><strong>並存架構可能不被允許</strong> — 若院方基於維運考量要求一次切換，回退將變成全院回退，風險級別完全不同。</li>
+    <li><strong>成醫現有介接的隱藏範圍</strong> — 規格把介接測試放在 Phase-2（老醫），但成醫 Phase-1 切換就會碰到；原廠配合度與費用都未定。</li>
+    <li><strong>Client 佈署規模</strong> — 數千台 PC、OS 版本混雜、.NET runtime 差異，預佈失敗的 PC 在切換日會直接變成臨床事件。</li>
+    <li><strong>測試環境延遲</strong> — 院方出硬體，時程不在我們手上；DB 複本的個資去識別化也需要院方決策。</li>
+    <li><strong>健保申報週期</strong> — 每月 1–20 日申報期間住院與批價不宜切換，實際可用切換窗比日曆少一半。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>斗六分院與成醫是同一顆 DB、同一份程式、只靠院區參數區分嗎？還是斗六有獨立 DB／分支？</li>
+    <li>現行 client 是 WinForms + WCF 嗎？有無 Web 端？client 更新是 launcher、ClickOnce 還是 GPO？</li>
+    <li>院方是否接受 VB 與 C# 後端並存最長 3 個月？VB 後端下線由誰決定？</li>
+    <li>測試環境 DB 複本用真實資料還是去識別化？誰負責去識別化？多久刷新一次？</li>
+    <li>成醫現有院內／院外介接共幾條？各原廠是否有維護合約可以配合測試？費用誰出？</li>
+    <li>上線順序：斗六先導是否可行？院方是否反而希望成醫先（因為 HIS 組在成醫）？</li>
+    <li>成醫 PC 總數、OS 分布、是否有仍在 Windows 7／舊 .NET 的機器？</li>
+    <li>hypercare 期間的叫修 SLA 是否比照保固條款（緊急 2 小時）？現場人力需求？</li>
+    <li>「原始程式碼（電子檔）」交付是否包含尚未上線的模組？驗收以「兩院全部上線」為準還是「整合測試完成即可」？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

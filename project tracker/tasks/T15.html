@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T15 老人醫院上線環境準備與資料轉置 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 3 · deploy（實際須在 Phase 2 後段啟動）</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T15</div>
+  <h1>老人醫院上線環境準備與資料轉置</h1>
+  <p class="lede">讓一間<strong>還沒開的醫院</strong>擁有可運作的 HIS 環境：DC 組蓋伺服器與一組測試環境，我們負責把成醫的基本資料「複製→過濾→換鑰匙」成老醫的版本、把老醫對內對外的每一條連線打通、建好角色權限、把 client 端環境定型並訓練使用者。規格把這件事寫成五個小點，實際上它是 T16 老醫上線的全部前置條件，而且時程被開院日期與硬體到位日綁死——這兩件事都在院方手上。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 3 · 630 天內（建議第 400 天啟動）</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（client 周邊、網路、健保 VPN）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 18 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T02.html">T02</a> <a href="./T07.html">T07</a> <a href="./T08.html">T08</a> <a href="./M03.html">M03</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T16.html">T16</a> <a href="./X01.html">X01</a> <a href="./H01.html">H01</a>–<a href="./H09.html">H09</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(五)-1、貳-二-(二)、貳-二-(三)、伍-三-8</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(五)：「新一代 HIS 須完成成大醫院、斗六分院及老人醫院的改版上線；上線順序配合老人醫院硬體設備及開院時程，與院方討論後訂定。1. 老人醫院上線環境準備：資訊室 DC 組統籌伺服器安裝與建置，上線前另建置一組對應環境（基礎配置資源）供測試；資訊室 HIS 組協助：基本資料轉置、跨系統、外部機構連線設定、權限角色設定、Client 端環境設定、教育訓練。」</p>
+    <p>貳-二-(二)：「老人醫院所需介接的院內其他系統（如 LIS、MIS、PACS 等），本院會請相關單位或廠商提供標準介接說明…院外介接（如健保 IC 卡、雲端病歷、轉診交換平台等）也會視需要提供相關資訊。」</p>
+    <p>貳-二-(三)：「本院會提供本案所需的軟硬體環境及周邊平台相關資料予得標廠商，以確保功能需求能於老人醫院線上環境運作。」</p>
+    <p>伍-三-8：「上線前應清除正式環境之測試資料與帳號及管理資料與帳號。」</p>
+  </blockquote>
+  <p>規格未載明：老醫 DB 是獨立一顆還是與成醫共用、「基本資料」的範圍、測試環境是否含 DR、老醫 AD 網域歸屬、健保院所代號何時取得、開院日期。「資訊室 HIS 組協助」的主詞是院方，但實際動手寫轉置腳本與連線設定的必然是我們，分工要在工作計畫書寫清楚。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>我們的假設：老醫有自己的 HIS DB 與應用伺服器（因為規格要用 CDC／MQ／Replication 做跨院查詢，若共用 DB 就不需要中台），程式與成醫同一份，靠 T02 的院區參數區分。這個假設是 P0 待確認項，答案不同會改變一半的工作內容。</p>
+  <pre class="diagram">
+  成醫 DC                                              老人醫院機房（DC 組建置）
+  ┌────────────────────┐                              ┌──────────────────────────┐
+  │ 成醫 HIS DB (C# 版) │ ── 基本資料轉置 (一次性+差異) ──▶│ 老醫 HIS DB (PROD)        │
+  │                    │ ◀═══ 中台 CDC/Replication ═══▶│ 老醫 AP/WCF (HTTP+HTTPS)   │
+  │ 數據整合中台 (T08)   │       專線 / VPN               │ 老醫 UAT 環境（對應配置）    │
+  └────────────────────┘                              │ 老醫 SIT（我們用，可較小）   │
+                                                      └─────┬──────────┬─────────┘
+                                                            │ 防火牆矩陣  │
+        院外 ◀────────────────────────────────────────────────┘          └──▶ 院內
+        健保署 VPN（老醫自己的院所代號）                           LIS / MIS / PACS / EMR
+        電子病歷交換中心、轉診平台                                 叫號機、藥包機、繳費機…(H01–H09)
+        部立台南醫院、郭綜合（跨院介接）                            AD / 認證授權 / 印表機伺服器
+
+  轉置流程：成醫來源表 → 抽取 → 過濾（只留老醫需要的科別/藥品/醫令）→ 換鑰匙（院區碼、院所代號、
+           診間/病房/床位重編）→ 載入 UAT → 各主責單位簽認 → 載入 PROD → 開院前差異補轉 → 清測試帳號
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>環境清單</strong>：(1) DEV——我們自己的，不算院方資源；(2) SIT 整合測試——老醫版程式 + 中台 + 介接 stub，H01–H09 與 X01 在這裡跑；(3) UAT——規格要求的「對應環境（基礎配置資源）」，配置與 PROD 對應，使用者驗收與教育訓練用；(4) PROD——老醫正式環境。DR 規格未提，需確認 DC 組規劃。每個環境都要有自己的 PUB_Config／PCS_Ip_Config 院區設定與 WCF 端點，這正是 T02 參數化的驗證場。</li>
+    <li><strong>基本資料（master data）範圍</strong>——我們的初步清單，需院方逐表確認：院區／科別／診間／病房／床位（含 ICU 定義，供 T10）；人員檔（醫師、護理、藥師、行政，含跨院支援人員的雙院身分）；認證授權系統的角色與功能權限；藥品檔（含健保藥價、院內碼、藥包機對應碼）；醫令碼與收費碼（健保支付標準 + 自費）；檢驗檢查項目與儀器／科室排程主檔（供 T12）；ICD-10 診斷碼；供膳菜單與餐別（供 T13）；電子表單範本；檢核規則表（T03）；PUB_Config／PCS_Ip_Config／工作站設定。<strong>病人資料不轉</strong>——老醫從零開始，唯一例外是住院健檢歷史（T08 中台銜接）以及跨院掛號需要的病人主檔對照（T09 決定）。</li>
+    <li><strong>轉置方法</strong>：每張表一份「轉置規格」（來源、過濾條件、鑰匙轉換、主責簽認單位），腳本化、可重跑。開院前 T-14 天做完整轉置到 PROD，T-1 天做差異補轉（成醫在這兩週內新增的藥品、醫令）。老醫特有的資料（新科別、新診間、老醫自己的 IC 卡院所代號、老醫的健保特約項目）由老醫籌備處提供，不是從成醫轉。</li>
+    <li><strong>網路與防火牆</strong>：一張連線矩陣（來源、目的、port、協定、方向、負責人、開通狀態）。院內：老醫 client → 老醫 AP → 老醫 DB；老醫 AP ↔ 成醫中台（replication／MQ）；老醫 AP ↔ LIS／MIS／PACS／EMR 等（各自的協定）；H01–H09 設備網段。院外：健保署 VPN（老醫需自己的醫事機構代號與 VPN 申請，健保署作業有數週前置期）、電子病歷交換中心、轉診平台、部立台南醫院與郭綜合的跨院介接。</li>
+    <li><strong>AD／權限</strong>：老醫是加入成醫 AD 網域還是新網域<strong>規格未載明</strong>；跨院支援人員需同時在兩院有身分與權限，認證授權系統的角色要以「院區 × 角色」建模（T02 的 Context 類別已含 department、station）。上線前依伍-三-8 清掉測試帳號與我們的管理帳號，只留院方管理帳號。</li>
+    <li><strong>Client 端環境</strong>：標準 PC 映像（OS、.NET runtime、C# client、WCF 端點指向老醫、讀卡機與印表機驅動、GPO），沿用 T06 的 launcher 與「工作站→版本」設定表。老醫是新醫院，PC、讀卡機、印表機採購全由院方進行，到貨日期直接決定 client 環境何時能做。</li>
+    <li><strong>教育訓練</strong>：老醫使用者是新招或從成醫調任<strong>需確認</strong>；成醫調任者只需差異訓練（老醫功能 T09–T14），新人要完整訓練。這與 M02 的技術移轉（給資訊人員）是兩回事，場次與教材要另估。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>基本資料轉置：約 40–60 張表的轉置規格、腳本、UAT 兩輪、簽認追蹤，6 人月。三套環境的部署腳本、設定檔、與 DC 組協作建置及驗證，4 人月。連線矩陣、各對口單位協調、連通測試（院內 10 幾個系統 + 院外 5 個以上），3 人月。AD 與角色權限建模與匯入，2 人月。Client 映像與佈署，1 人月。老醫使用者訓練（估 10 場）與教材，2 人月。合計 18 人月。變數：若老醫 DB 與成醫共用（而非獨立），轉置工作減半但 T02 的隔離工作加倍；若開院延期，本任務人力會空轉，需在合約談待命條件。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>醫事機構設立流程</strong>：老醫要有自己的醫事機構代號、健保特約、IC 卡 VPN、電子病歷交換憑證，這些是院方向衛福部與健保署申請的行政程序，週期以月計，我們只能催不能做。</li>
+    <li><strong>哪些主檔「可以複製」、哪些「必須重建」</strong>：藥品檔複製過去但老醫藥局不一定備齊所有品項；醫令碼可複製但老醫特約項目不同；床位一定重建。需要藥局、醫事室、護理部各派人簽認，否則上線後會出現「開得出來但老醫沒有」的醫令。</li>
+    <li><strong>老年醫學的作業差異</strong>：老醫可能沒有急診、產科、兒科，但有長照銜接、復健、失智照護等流程，這些差異在 T07 訪談決定，直接影響要轉哪些科別與表單。</li>
+    <li><strong>資安合規（M03）</strong>：新環境上線前要有防護需求等級評估、弱掃／滲透、遠端連線規範；DC 組建的主機要先修補漏洞關閉不必要服務（伍-二-1）。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T02.html">T02</a> — 老醫環境就是「第三個院區參數集」；沒有參數化，老醫環境要另一份程式。</li>
+    <li><a href="./T07.html">T07</a> — 老醫差異需求決定要轉哪些科別、表單、流程；訪談沒定案，基本資料範圍定不了（部分依賴：可先做不受差異影響的表）。</li>
+    <li><a href="./T08.html">T08</a> — 中台的 replication／MQ 拓樸決定老醫 DB 與成醫之間要開哪些連線、住院健檢歷史怎麼銜接（部分依賴：連線矩陣可先做）。</li>
+    <li><a href="./M03.html">M03</a> — 新環境上線前的防護需求等級評估、弱掃、遠端連線授權是硬門檻。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T16.html">T16</a> — 環境、資料、連線、權限、client 全部就緒才能上線。</li>
+    <li><a href="./X01.html">X01</a>、<a href="./H01.html">H01</a>–<a href="./H09.html">H09</a> — 介接測試需要老醫 SIT／UAT 環境與對應網段、防火牆已開。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>不開發設備介接，但要讓設備「接得上」：網段、防火牆、驅動、憑證。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>老醫伺服器（DB、AP、UAT）</td><td>SQL Server（假設）、WCF HTTP/HTTPS</td><td>資訊室 DC 組</td><td>主機到位、OS 修補、憑證、我們的部署帳號</td></tr>
+      <tr><td>健保署 VPN 與 IC 卡讀卡機</td><td>健保 VPN、CSHIS DLL</td><td>健保署（院方申請）</td><td>老醫院所代號、VPN 開通、測試卡</td></tr>
+      <tr><td>院內系統（LIS、MIS、PACS、EMR、電子白板…）</td><td>各系統標準介接說明（HL7、DB view、Web service）</td><td>各原廠與院方對口單位</td><td>老醫端的測試 endpoint 與防火牆規則</td></tr>
+      <tr><td>院外機構（EEC、轉診平台、部立台南、郭綜合）</td><td>各平台規範</td><td>院方向各機構申請</td><td>憑證、白名單 IP</td></tr>
+      <tr><td>Client PC、印表機、標籤機、條碼機</td><td>Windows 驅動、GPO</td><td>院方採購與資訊室</td><td>到貨日、標準映像驗證機</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>老醫目標架構決定</strong>：獨立 DB 或共用成醫 DB、AD 網域歸屬、主機放老醫或成醫 DC、有無 DR</td><td>資訊室 DC 組、HIS 組主管</td><td>決定轉置範圍、T02 隔離設計、中台拓樸；答案不同工作內容差一半。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>老醫開院日期與硬體到位時程</strong>（主機、網路、PC、周邊）</td><td>老人醫院籌備處、資訊室</td><td>整個 Phase 3 的排程錨點；規格說「配合開院時程」但沒給日期。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><strong>基本資料範圍簽認</strong>：我們的表清單由各主責單位（藥局、醫事室、護理部、營養、檢驗）確認可複製／需重建／不需要</td><td>資訊室 HIS 組協調各單位</td><td>沒有簽認，轉置後會出現老醫不存在的醫令與藥品。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><strong>老醫醫事機構代號、健保 VPN、電子病歷交換憑證的申請進度</strong></td><td>老人醫院籌備處、醫事室</td><td>行政程序以月計；沒有代號，健保相關功能與 IC 卡無法在老醫測試。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老醫<strong>院內系統清單與各原廠窗口</strong>（老醫用哪套 LIS／PACS／MIS？與成醫同一套還是新採購？）</td><td>資訊室、老人醫院籌備處</td><td>連線矩陣與 X01 的範圍；新採購的系統可能比 HIS 更晚到。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>DC 組的<strong>環境建置時程與我們的存取方式</strong>（部署帳號、遠端連線規範依伍-四）</td><td>資訊室 DC 組、資安窗口</td><td>沒有存取權我們無法部署；遠端連線需事先授權與掃毒規範。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>老醫<strong>人員來源與名冊</strong>（新招／成醫調任比例）、組織與科別架構</td><td>老人醫院籌備處、人資</td><td>角色權限與訓練場次規劃；跨院人員需雙院身分。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>開院日期與硬體由院方控制</strong> — 開院延期我們人力空轉，開院提前則 T09–T14 與 H01–H09 未完成就得上線；合約應有待命與變更條款。</li>
+    <li><strong>架構決定懸而未決</strong> — 獨立 DB 或共用 DB 若到 Phase 2 後段才定，T02 與 T08 的設計都要返工。</li>
+    <li><strong>行政程序長</strong> — 醫事機構代號、健保特約、VPN、憑證都不是技術問題，但每一項都能擋住上線。</li>
+    <li><strong>主檔簽認拖延</strong> — 各單位對「老醫要不要這個醫令」沒有人拍板，是醫院專案最常見的延遲來源。</li>
+    <li><strong>老醫院內系統可能是新採購</strong> — LIS／PACS 若是老醫另購的新系統，其上線時程不在本案控制內，介接測試會被連帶延後。</li>
+    <li><strong>資安門檻</strong> — M03 的等級評估與弱掃若排在上線前兩週，任何發現都會直接延後開院。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>老醫 HIS DB 是獨立實例還是與成醫共用？主機在老醫機房還是成醫 DC？有無 DR 或異地備援要求？</li>
+    <li>老醫 AD 是成醫網域延伸還是新網域？認證授權系統是否支援一人多院區身分？</li>
+    <li>「基本資料」院方的定義為何？是否已有過去斗六分院建置時的轉置清單可沿用？</li>
+    <li>病人主檔是否跨院共用（同一病歷號）？若是，是共用 DB 還是中台同步？（與 T09 連動）</li>
+    <li>老醫的 LIS、PACS、MIS、EMR 是沿用成醫還是新採購？各自的上線時程？</li>
+    <li>老醫醫事機構代號、健保特約、IC 卡 VPN 的申請由誰負責、目前進度？</li>
+    <li>測試環境（UAT）的「基礎配置資源」規模多大？上線後是否保留作為老醫的常設測試環境？</li>
+    <li>老醫使用者訓練場次是否計入 M02 的 16 小時？還是另計？教材語言與形式？</li>
+    <li>開院是否分階段（先門診後住院）？若是，轉置與環境也要分階段。</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

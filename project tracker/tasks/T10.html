@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T10 跨院床位查詢（ICU、普通病房、空床） — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · shared</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T10</div>
+  <h1>跨院床位查詢（ICU、普通病房、空床）</h1>
+  <p class="lede">讓老人醫院與成大醫院互相看見對方的 ICU、普通病房與空床狀態，供轉院、轉入 ICU、急診待床決策使用。規格只要求「查詢」，因此主體是讀路徑（T08 中台）；但實務上一查到空床就會想「留床」，訪談極可能追加預留功能，我們先把寫路徑（跨院留床命令）留好接口。難點不在技術，在於兩院床位狀態語意與病房代碼完全不同，且床位狀態變化極快。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d2"></span> 2/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 5 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T08.html">T08</a> <a href="./T02.html">T02</a> <a href="./T01.html">T01</a> <a href="./T07.html">T07</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T14.html">T14</a> <a href="./T11.html">T11</a> <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(二)-2、貳-一-(二)-7、貳-一-(二)-8</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(二)-2：「查詢老人醫院及成大醫院 ICU、普通病房及相關空床資訊。」</p>
+    <p>貳-一-(二)-7 數據整合中台：「……跨院資源共享：掛號資訊、<strong>床位資訊</strong>、檢查科室儀器排程、開刀房手術排程、檢驗抽血、營養供膳等。」</p>
+    <p>附錄住院子系統（25 個）含「入院管理系統」、「出院管理系統」、「住院共用系統」、「護理站書記」、「護理管理」；規格 #26「電子白板系統」為須測試之介接。</p>
+  </blockquote>
+  <p>「相關空床資訊」四個字沒有定義：是純空床數？含預計出院（可用床）？含隔離床、負壓床、加護／亞加護等級？是否含急診留觀床、健檢病房？規格未載明，需確認。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>核心是一張「跨院床位狀態正規化視圖」：兩院各自的入院／出院／轉床／清潔事件經 CDC 進中台後，由一層對照表把各院的病房代碼、床位狀態碼轉成統一語意，再提供給老人醫院與成大的查詢畫面。留床若被要求，走跨院命令進擁有院區的入院管理系統。</p>
+  <pre class="diagram">
+  成大 核心 HIS DB                       老人醫院 核心 HIS DB
+  (入院管理/出院管理/護理站書記)          (入院管理/出院管理/護理站書記)
+  床位表、轉床、出院預告、清潔狀態         床位表、轉床、出院預告、清潔狀態
+        │ CDC (秒級)                            │ CDC
+        ▼                                       ▼
+┌───────────────────────────────────────────────────────────┐
+│ T08 數據整合中台                                            │
+│  raw: 成大_BED, 老醫_BED            對照表(T02 參數):        │
+│  ─────────────────────────▶  病房代碼 / 病房等級 /           │
+│                                    床位狀態語意 / 性別 / 隔離 │
+│  統一視圖 CrossCampusBedView:                                │
+│  campus, ward, unit(ICU/一般/亞加護), bed, status            │
+│  (occupied|empty_dirty|empty_clean|reserved|blocked),        │
+│  gender_constraint, isolation, expected_discharge, asof_ts   │
+└───────────────────────────────────────────────────────────┘
+        │ 讀：查詢畫面 / 空床看板 / T14 轉檢與代檢 / 電子白板(#26)
+        ▼
+  老人醫院 HIS 床位查詢         成大 HIS 床位查詢
+        │ (若訪談追加「留床」)
+        ▼
+┌─────────────────────────┐  ReserveBedCommand   ┌──────────────────────┐
+│ 跨院留床命令 API (HTTPS) │ ───────────────────▶ │ 床位擁有院區 入院管理  │
+│ idempotencyKey, TTL,    │ ◀─────────────────── │ 原生留床/佔床規則      │
+│ 審計                    │  reserved / conflict │                      │
+└─────────────────────────┘                      └──────────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>來源事件</strong>：入院（佔床）、出院（釋放）、轉床（釋放＋佔床）、出院預告（預計可用）、床位清潔完成（可入住）、床位停用（維修／隔離消毒）、留床（reserved）。這些在成大分散在入院管理、出院管理、護理站書記與可能的清潔系統；需盤點每個事件實際更新哪張表哪個欄位。</li>
+    <li><strong>狀態語意正規化</strong>：至少區分 <code>occupied / empty_dirty / empty_clean / reserved / blocked</code>。「空床」必須明確定義為 empty_clean（可立即入住）還是 empty（含待清潔）；兩院定義若不同，畫面要標示。</li>
+    <li><strong>床位屬性</strong>：病房等級（ICU／亞加護／一般／隔離／負壓／健保床／自費床、單人／雙人／多人）、性別限制（多人房需同性別）、隔離類別（接觸／飛沫／空氣）、年齡／科別限制。老人醫院可能另有失智專區、長照銜接床等新類型。</li>
+    <li><strong>對照表（T02）</strong>：病房代碼、護理站代碼、床位等級代碼三院各異，全部以設定表維護，不能寫死。</li>
+    <li><strong>時效性</strong>：床位是「秒級」變動資料，畫面必須顯示 <code>asof_ts</code>（資料時間）並在超過門檻時警示；決策者要知道這是幾秒前的快照。</li>
+    <li><strong>留床（若追加）</strong>：跨院留床有 TTL（例如 2 小時未辦入院自動釋放），必須由擁有院區的原生規則執行，並寫審計。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>約 5 人月：床位事件盤點與 CDC 表對應 1 人月；狀態正規化與對照表設定 1 人月；查詢畫面／看板（含性別、隔離、等級篩選）1.5 人月；測試與兩院護理部確認語意 1 人月；預留留床命令接口 0.5 人月。若訪談確認需要完整跨院留床（含 TTL、通知、取消），另加 2–3 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>「空床」不是布林值</strong>：病人出院到床可入住之間有清潔、消毒、維修等狀態；醫院內部常以人工白板或口頭掌握，HIS 裡的狀態不一定即時。查詢結果若比護理站白板還「樂觀」，會失去信任。</li>
+    <li><strong>ICU 床位邏輯</strong>：ICU 常有「床空但護理人力不足不收」的情況，HIS 空床數 ≠ 可收床數；是否要顯示「可收」需與護理部確認資料來源（通常是護理長手動維護）。</li>
+    <li><strong>性別與隔離約束</strong>：多人房空一床但同房為異性即無法收；隔離病人需單人／負壓房。查詢畫面若不呈現這些約束，空床數會誤導。</li>
+    <li><strong>病房代碼與等級</strong>：健保床／自費床／差額床、特等房，三院代碼與計價不同；轉院決策也會看費用。</li>
+    <li><strong>院際轉院流程</strong>：床位查詢的實際場景是轉院（老人醫院病況惡化轉成大 ICU、成大穩定後轉老人醫院）。轉院牽涉救護車、病歷摘要、家屬同意，本任務只提供床位可見性，但訪談時要弄清流程以免做出沒人用的功能。</li>
+    <li><strong>電子白板（#26）</strong>：成大已有電子白板系統顯示床位；跨院視圖是否也要餵給電子白板，或反過來以電子白板為來源，需確認。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T08.html">T08</a> — 床位表與入出院事件的 CDC 同步是本任務的全部資料來源；正規化視圖也建議放在中台。</li>
+    <li><a href="./T02.html">T02</a> — 病房／床位／狀態代碼對照全靠院區參數化機制。</li>
+    <li><a href="./T01.html">T01</a> — 入院管理／出院管理子系統改寫為 C# 時要順便把床位狀態變更集中到一個服務，否則留床命令沒有落點。</li>
+    <li><a href="./T07.html">T07</a> — 訪談定義「相關空床資訊」範圍、是否需要留床。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T14.html">T14</a> 轉檢與代檢 — 需住院的代檢（例如需觀察床）會查對方院區床位。</li>
+    <li><a href="./T11.html">T11</a> 跨院手術排程 — 排刀時需確認術後 ICU／病房床位，會重用本任務的視圖。</li>
+    <li><a href="./T16.html">T16</a> 老人醫院上線 — 轉院決策必用。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無。床位狀態全部來自 HIS 內部作業系統（入院、出院、護理站）的資料表，經 CDC 進中台。院內若有床頭卡、床位感測或清潔管理 App，屬於資料來源的上游，不在本任務範圍；電子白板（規格 #26）為顯示端，由 X01 測試。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>無實體設備</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>（間接）電子白板系統 #26</td><td>規格未載明；推測為讀 HIS 床位表或 HL7 ADT</td><td>電子白板原廠／資訊室 HIS 組</td><td>確認跨院視圖是否需餵給白板；屬 X01 範圍</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>成大床位資料模型與狀態碼定義（床位表、狀態欄位、每個狀態由哪支程式在什麼時機更新）</td><td>資訊室 HIS 組（入院管理／護理站書記負責人）</td><td>沒有就無法定義「空床」語意，正規化視圖做不出來</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>「相關空床資訊」範圍決議：是否含預計出院、隔離／負壓、急診留觀、健檢病房；是否需要留床功能</td><td>老人醫院籌備處、成大護理部、T07 訪談</td><td>決定本任務是 5 人月還是 8 人月</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老人醫院病房規劃：病房／護理站代碼、床位等級、ICU 床數、特殊病房類型（失智專區等）</td><td>老人醫院籌備處、護理部</td><td>對照表與測試資料需要；開院前變動要有版本控管</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>成大床位清潔流程資訊來源（HIS 內欄位？外部清潔系統？人工白板？）</td><td>成大護理部、總務／環管單位</td><td>若清潔狀態不在 HIS，查詢只能顯示「空但未確認可入住」</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>T08 中台床位相關表同步清單與延遲 SLA</td><td>資訊室 HIS 組／DC 組（T08 團隊）</td><td>床位為秒級變動資料，延遲需可量測並顯示</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>電子白板系統的資料介面說明</td><td>電子白板原廠、資訊室 HIS 組</td><td>確認跨院視圖與白板的關係，避免兩套床位真相</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>跨院床位查詢權限（哪些角色可看對方院區；是否含病人姓名）</td><td>兩院護理部、認證授權系統負責人、個資窗口</td><td>床位視圖含病人資訊時牽涉個資（M03）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>HIS 床位狀態與現場不一致</strong> — 若清潔、可收床數等狀態是人工維護或不在 HIS，跨院查詢的準確度天花板由上游決定，使用者會回頭打電話確認，功能失去價值。</li>
+    <li><strong>兩院語意不一致</strong> — 同樣顯示「空床」但一院含待清潔、一院不含；必須在正規化視圖層強制統一並在畫面標示。</li>
+    <li><strong>範圍蔓延到留床</strong> — 「查詢」很容易在訪談時變成「查詢＋留床＋通知」；留床牽涉擁有院區的入院管理流程與 TTL 釋放，要先議定是否納入 Phase 2。</li>
+    <li><strong>老人醫院病房規劃晚定</strong> — 開院前病房配置可能一直改，對照表要有版本並支援上線前一次性重載。</li>
+    <li><strong>個資</strong> — 床位視圖若帶病人姓名／診斷，跨院顯示需經個資評估；建議預設只顯示床位狀態，病人資訊需額外權限。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>「空床」的定義：出院即算？清潔完成才算？含預計今日出院的「可用床」？規格未載明，需確認。</li>
+    <li>ICU 是否需呈現「可收床數」（考慮護理人力）而非單純空床數？資料來源為何？</li>
+    <li>是否需要跨院留床？若需要，TTL、取消、通知規則為何？由誰有權留床？</li>
+    <li>查詢範圍是否含急診留觀床、健檢病房、日間病房、安寧病房？</li>
+    <li>斗六分院是否納入？（規格僅寫老人醫院與成大）</li>
+    <li>跨院床位視圖是否要顯示病人姓名／診斷／主治醫師？個資評估結果為何？</li>
+    <li>電子白板（#26）是資料來源還是消費端？是否需要餵跨院資料給它？</li>
+    <li>成大是否已有院內空床看板或床位管理中心（bed management）流程？跨院功能應嵌入該流程而非另建。</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

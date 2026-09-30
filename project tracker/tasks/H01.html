@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H01 急診檢傷系統介接 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · hardware</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">H01</div>
+  <h1>急診檢傷系統介接（開發）</h1>
+  <p class="lede">為老人醫院急診建立 HIS（急診櫃台／急診醫囑）與檢傷系統之間的資料交換：病人到院 → 檢傷分級（TTAS）→ 急診看診與健保申報。規格只給了系統名稱，沒有廠商、協定或介接文件；成大總院已有同類介接在跑，第一步是把現有 VB.Net 介接程式與規格拿到手，再確認老醫買的是不是同一套。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-yes">有（檢傷站周邊：生理監視器、IC 卡讀卡機、手圈／標籤印表機）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 4 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> · <a href="./T02.html">T02</a> · <a href="./T07.html">T07</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T15.html">T15</a> · <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)-1、貳-二-(二)、貳-二-(三)、附錄（急診 7 子系統）</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(三)「老人醫院 HIS 跨平台外部介接開發與內部跨系統介接測試」：須開發的外部介接介面程式 —「1. 急診檢傷系統」。</p>
+    <p>貳-二-(二)「老人醫院系統介接需求」：老人醫院所需介接的院內其他系統（如 LIS、MIS、PACS 等），本院會請相關單位或廠商提供標準介接說明供得標廠商開發。</p>
+    <p>貳-二-(三)：本院會提供本案所需的軟硬體環境及周邊平台相關資料予得標廠商。</p>
+    <p>附錄：急診分類含「急診櫃台、急診醫囑、急診藥局、急診護囑、跨團隊會診回覆、電子表單、人體器官保存庫」7 個子系統。</p>
+  </blockquote>
+  <p>規格全文對檢傷系統的描述只有這一行。廠商是誰、走什麼協定、老醫是否沿用總院的檢傷系統，<strong>規格未載明，需確認</strong>。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>台灣醫院的急診檢傷幾乎都依「台灣急診檢傷與急迫度分級量表」（TTAS，第 1～5 級）作業。實作上有兩種常見型態：(A) 檢傷是<strong>獨立廠商產品</strong>（含急診醫學會授權的 TTAS 決策引擎），與 HIS 之間交換病人與檢傷結果；(B) 檢傷畫面<strong>內建在 HIS 急診櫃台／急診護囑</strong>，只向外呼叫 TTAS 引擎。規格把它列為「外部介接」，我們先以 (A) 為基準規劃，但要儘快確認總院實際是哪一種。</p>
+  <pre class="diagram">
+ 到院／掛號                 檢傷（護理師）                    看診／申報
+┌────────────────┐  ①病人到院    ┌──────────────────┐  ③檢傷結果   ┌──────────────────┐
+│ HIS 急診櫃台   │ ───────────▶ │ 急診檢傷系統     │ ───────────▶ │ HIS 急診醫囑／護囑│
+│ (急診掛號/IC卡)│  病歷號/姓名  │ (外部廠商/TTAS)  │  級數/主訴   │ 看診順序、時效  │
+│                │  到院方式/時間 │                  │  生命徵象    │ 健保急診申報    │
+└────────────────┘              └──────────────────┘  隔離/急救    └──────────────────┘
+        │                          ▲     │                                │
+        │ ②                        │     │ 周邊：生理監視器(BP/SpO2/體溫)   │
+        ▼                          │     │ 手圈/標籤印表機、IC 卡讀卡機     ▼
+┌────────────────┐    ④重新檢傷/更正  │                          ┌──────────────────┐
+│ 介接層 (新 C#) │ ◀────────────────┘                          │ 數據中台 (T08)   │
+│ 交換表/HL7/API │  ─── 稽核紀錄、重送、對帳 ───────────────────▶│ 急診品質指標     │
+└────────────────┘                                              └──────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>① 到院通知（HIS → 檢傷）</strong>：急診櫃台完成掛號（或先檢傷後掛號的「未掛號檢傷」）即送出病歷號、姓名、性別、生日、到院時間、到院方式（救護車／自行）、就診序號。若是 HL7 即 ADT^A04；若是資料庫交換即寫入交換表或由檢傷端讀 HIS View。</li>
+    <li><strong>③ 檢傷結果（檢傷 → HIS）</strong>：TTAS 級數（1～5）、主訴代碼、生命徵象、疼痛指數、檢傷時間、檢傷護理師、是否需隔離（TOCC）、是否急救、分區（內外科／小兒／急救區）。HIS 用它決定看診順序、計算「檢傷到看診時間」品質指標，並帶入健保急診申報的檢傷級數欄位。</li>
+    <li><strong>④ 重新檢傷／更正</strong>：級數會被改；介接必須接受同一就診序號的多筆版本，HIS 以最新版為準但保留歷程。</li>
+    <li><strong>介接層</strong>：以新 C# 後端（T01 產出的 WCF/Web API）承接，不讓檢傷廠商直連核心 DB（符合 T04 SQL 移至後端、T08 保護核心 DB 的方向）。交換紀錄需可重送、可對帳。</li>
+    <li><strong>周邊硬體</strong>：多半掛在檢傷系統那一側（生理監視器經廠商 gateway 自動帶入）；HIS 側只有 IC 卡讀卡機（醫療共用「IC 卡」子系統已有）與手圈印表機。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>約 4 人月：介接規格確認與對照總院現況 0.5、C# 介接服務（收送、版本、重送、稽核）1.5、急診櫃台／急診醫囑端配合修改（含院區參數化）1、與廠商聯測 + 模擬器 + 上線支援 1。前提是總院已有可參考的介接程式；若老醫改買不同廠牌檢傷系統、或協定從 DB 交換改為 HL7，再加 1～2 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>TTAS 分級與急診流程</strong>：5 級的定義、主訴代碼表、生命徵象門檻、小兒與成人差異、隔離／急救區分流。老人醫院病人以高齡為主，跌倒、譫妄、多重共病的檢傷判斷更常落在第 2～3 級邊界，護理端會要求更多提示，但這屬檢傷系統本身，我們要守住介接邊界。</li>
+    <li><strong>健保急診申報</strong>：急診診察費依檢傷級數分級給付（第 1、2 級與第 3～5 級不同），級數欄位必須正確回到 HIS 申報檔；更正級數後要連動更正申報。錯了就是核減。</li>
+    <li><strong>先檢傷後掛號</strong>：大量傷患、到院前無意識病人可能先檢傷後補掛號，病歷號可能是暫編號，事後合併病歷。介接要能處理「先有檢傷、後有掛號」與病歷合併。</li>
+    <li><strong>急診品質指標</strong>：檢傷至看診時間、急診滯留 &gt; 24/48 小時等，衛福部醫院評鑑與急診品質計畫都要，時間戳的來源必須講清楚是哪一端的系統時間。</li>
+    <li><strong>多院區參數</strong>：老醫、成醫、斗六的檢傷系統可能不是同一套（斗六規模小，可能是內建型）。介接層要能依院區切換協定與端點（T02）。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 急診櫃台、急診醫囑、急診護囑改寫為 C# 後才有新的介接掛載點；舊 VB.Net 介接程式是本任務的參考基準。</li>
+    <li><a href="./T02.html">T02</a> — 檢傷系統端點、協定、交換表名稱都要院區參數化，不能寫死老醫。</li>
+    <li><a href="./T07.html">T07</a> — 需求訪談要先確認老醫急診的規模、是否設檢傷站、與總院流程差異。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T15.html">T15</a> — 上線環境準備需要本介接的連線設定（IP、帳號、憑證）。</li>
+    <li><a href="./T16.html">T16</a> — 老醫開院；急診不能沒有檢傷。</li>
+    <li>間接：<a href="./T08.html">T08</a> 若急診指標要進 Dashboard，需要本介接產出的檢傷時間戳。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>檢傷系統本身是軟體，但它是廠商黑盒且旁邊掛著設備。我們直接碰的硬體很少，主要風險是廠商產品的協定與測試環境。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>急診檢傷系統（廠商產品或急診醫學會 TTAS 引擎）</td><td>最可能：SQL Server 交換表／View；其次 HL7 v2（ADT^A04/A08、ORU）；或廠商 HTTP API。規格未載明。</td><td>檢傷系統原廠 + 資訊室 HIS 組（現行介接規格）</td><td>廠商測試環境或模擬器（我們可自寫 HL7/交換表模擬器）；一台檢傷工作站接測試 HIS</td></tr>
+      <tr><td>生理監視器（血壓、SpO2、體溫）</td><td>通常由檢傷系統或監視器 gateway 接（RS-232/藍牙/HL7 ORU），不直連 HIS</td><td>監視器原廠；需確認是否要 HIS 承接</td><td>只有在 HIS 需直接承接時才要實機</td></tr>
+      <tr><td>健保 IC 卡讀卡機</td><td>健保署 CS/HCA API（醫療共用「IC 卡」子系統既有）</td><td>健保署／既有程式</td><td>測試卡與讀卡機（T01 共用）</td></tr>
+      <tr><td>手圈／標籤印表機</td><td>Windows 印表機驅動或 ZPL/EPL</td><td>印表機原廠</td><td>一台實機或 ZPL 模擬器</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>總院現行「急診櫃台／急診護囑 ↔ 檢傷系統」的 VB.Net 介接程式原始碼、介接規格（欄位、交換表 DDL 或 HL7 訊息樣本）、與廠商名稱</td><td>資訊室 HIS 組</td><td>成大已在跑同一介接；沒有它我們只能從零猜協定，估算與設計都不成立。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>老人醫院的檢傷系統採購決定：是否沿用總院同廠牌、採購時程、到貨與安裝日期、是否設急診與檢傷站</td><td>老人醫院籌備處／採購組</td><td>不同廠牌等於重做一次介接；沒有急診就整個任務降級為設定工作。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>檢傷系統原廠的介接文件（HL7 conformance 或 API/交換表規格）、測試環境或模擬器、技術窗口</td><td>檢傷系統原廠（經資訊室引介）</td><td>無測試環境只能等老醫實機到貨才能聯測，會壓到 Phase 3。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>急診健保申報中檢傷級數相關欄位與更正流程的現行做法、急診品質指標定義</td><td>資訊室 HIS 組／急診部／健保業務窗口</td><td>介接欄位少一個，申報就會被核減。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>總院測試 HIS 環境上一份可用的檢傷系統連線（或去識別化交換資料樣本）</td><td>資訊室 HIS 組／DC 組</td><td>Phase 1 改寫急診子系統時就能先驗證介接層，不必等 Phase 2。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>斗六分院的檢傷做法（是否同一介接）</td><td>資訊室 HIS 組／斗六分院</td><td>決定 T02 參數化要支援幾種型態。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>廠牌未定</strong> — 老醫檢傷系統由院方另案採購，到貨時間不受我們控制；若晚於 Phase 2 結束，介接開發只能對模擬器驗收。</li>
+    <li><strong>協定未知</strong> — 若總院是 DB 直連交換（兩系統共用 SQL Server），搬到老醫時 T04／T08 要求 SQL 移後端、保護核心 DB，可能被迫改成 API，廠商端要跟著改，牽涉廠商費用與意願。</li>
+    <li><strong>病歷合併與暫編號</strong> — 先檢傷後掛號的邊界案例，測試資料難造，容易上線後才爆。</li>
+    <li><strong>與 T01 時程耦合</strong> — 急診 7 子系統改寫若延後，本介接沒有掛載點。</li>
+    <li><strong>個資</strong> — 檢傷資料含主訴與生命徵象，交換紀錄要符合資安條款（伍-一-5、伍-三-7 加密），廠商端存取要進遠端連線規範。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>老人醫院是否設急診？規模（床數、是否 24 小時）？是否有檢傷站？</li>
+    <li>總院檢傷系統是獨立廠商產品，還是 HIS 內建 + 急診醫學會 TTAS 引擎？授權是否能延伸到老醫？</li>
+    <li>現行介接是 DB 交換表、HL7 還是 API？誰是主動方、輪詢間隔多少？</li>
+    <li>檢傷級數更正後，健保申報與看診順序的連動由哪一端負責？</li>
+    <li>生理監視器是否要由 HIS 直接承接數據？（若是，硬體範圍會擴大）</li>
+    <li>大量傷患／災難模式的暫編病歷號流程是否要納入介接？</li>
+    <li>檢傷時間戳以哪一端系統時間為準？NTP 同步是否由 DC 組負責？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

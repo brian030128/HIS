@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H06 智慧藥櫃介接（開發） — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · hardware</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">H06</div>
+  <h1>智慧藥櫃介接（開發）</h1>
+  <p class="lede">病房、急診、ICU 的自動調劑櫃（Pyxis／Omnicell 類，或國產機種）需要從 HIS 拿到病人名單與醫囑，才能讓護理師依醫囑取藥；取藥、退藥、報廢、盤點事件要回 HIS 扣庫與計費。管制藥品的每一筆存取都是法定稽核紀錄。規格只寫「智慧藥櫃」四個字，廠牌、模式（profiled／non-profiled）、台數、是否成大已有同類設備都未載明。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-yes">有（病房智慧藥櫃）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 6 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a>、<a href="./T02.html">T02</a>、<a href="./T07.html">T07</a>、<a href="./M03.html">M03</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T15.html">T15</a>、<a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)-6、貳-二-(二)、伍-一-5、伍-三-6</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>貳-一-(三)：須開發的外部介接介面程式 …… 6. 智慧藥櫃。<br>
+  貳-二-(二)：老人醫院所需介接的院內其他系統 …… 本院會請相關單位或廠商提供標準介接說明供得標廠商開發。<br>
+  伍-三-6：軟體或系統發展須進行版本管理，並依資安規範提供權限控管與存取紀錄保存。<br>
+  附錄子系統：住院「住院藥局系統」、「住院醫囑系統」、「給藥確認」、「臨床護理」；急診「急診醫囑」、「急診藥局」。</blockquote>
+  <p>規格未載明藥櫃廠牌、部署位置與台數、運作模式、成大是否已有智慧藥櫃介接可沿用。管制藥品管理條例對第一至第三級管制藥的簿冊與稽核要求，規格未提但法規上不可迴避。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>智慧藥櫃系統一律有一台原廠伺服器（cabinet server）管所有櫃體；HIS 只跟這台伺服器講話，不碰櫃體。介接內容分三條：(1) HIS → 藥櫃：病人名單（ADT 入院、轉床、出院、基本資料異動），讓櫃體知道這一床是誰；(2) HIS → 藥櫃：住院醫囑（藥囑新增、停用、修改），啟用 profiled 模式時護理師只能依有效醫囑取藥，non-profiled 模式則只送名單不送醫囑；(3) 藥櫃 → HIS：取藥／退藥／報廢／盤點／補藥事件，用來扣庫、計費（住院藥局系統、住院健保）、稽核與給藥確認勾稽。國際大廠走 HL7 v2（ADT^A01–A08、RDE^O11 醫囑、DFT^P03 計費事件），國產機種常用介接資料表或 REST API。使用者身分則要把 HIS／AD 帳號、護理師執照與員工證或指紋綁定到藥櫃。</p>
+  <pre class="diagram">
+┌──────────────────────┐   ADT^A01/A02/A03/A08 病人名單     ┌──────────────────────┐          ┌──────────────┐
+│ HIS 入院管理／住院醫囑 │ ─────────────────────────────▶   │ 智慧藥櫃伺服器         │ ◀──────▶ │ 病房藥櫃 ×N   │
+│ (C#)                 │   RDE^O11 藥囑 (profiled 模式)     │ (原廠 cabinet server) │          │ 急診／ICU 藥櫃│
+│                      │ ─────────────────────────────▶   │                      │          │ 管制藥抽屜    │
+└──────────────────────┘                                   └──────────────────────┘          └──────────────┘
+        ▲                                                            │
+        │   取藥／退藥／報廢／盤點事件  DFT^P03 或介接表／API           │
+        │ ◀──────────────────────────────────────────────────────────┘
+┌──────────────────────┐        ┌──────────────────────┐        ┌──────────────────────┐
+│ 藥櫃介接服務 (C#)      │ ─────▶ │ 住院藥局系統 扣庫／計費  │ ─────▶ │ 管制藥簿冊／稽核報表    │
+│ HL7 或介接表收發、對帳  │        │ 給藥確認 勾稽           │        │ (藥劑部、食藥署申報)   │
+└──────────────────────┘        └──────────────────────┘        └──────────────────────┘
+        ▲  使用者／執照同步（AD、員工證）
+┌──────────────────────┐
+│ 認證授權系統 (共用)     │
+└──────────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>病人名單同步</strong>：入院、轉床、出院、改名，要即時（分鐘級）推到藥櫃；漏掉轉床就會在錯的病房取不到藥。可與 H04 共用 HL7 引擎的 ADT 發送。</li>
+    <li><strong>醫囑同步</strong>：住院藥囑新增、修改、停用、停藥後的殘留處理；只送櫃內有的藥品（藥碼對照表），並標示管制藥等級。</li>
+    <li><strong>事件回收與對帳</strong>：每筆取藥事件對應到醫囑與病人，寫入住院藥局計費；退藥、報廢、override（無醫囑取藥）要走例外流程；每日與藥櫃庫存對帳。</li>
+    <li><strong>管制藥稽核</strong>：第一至三級管制藥的取用需雙人見證、每筆留存取用者與見證者、定期盤點差異報告；HIS 端要能產出管制藥簿冊資料供藥劑部與食藥署申報。</li>
+    <li><strong>帳號與身分</strong>：藥櫃使用者主檔從 HIS 認證授權系統或 AD 同步，含護理師執照、可取管制藥權限；離職停權要同步。屬 M03 權限控管與存取紀錄範圍。</li>
+    <li><strong>藥碼與庫存主檔</strong>：院內藥碼 ↔ 藥櫃藥品代碼、各櫃基準量（par level），由藥劑部維護。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>ADT 與醫囑下送 1.5 人月（若 H04 已有 HL7 引擎可省 0.5）；事件回收、計費對帳與例外處理 1.5 人月；管制藥稽核與報表 1 人月；帳號同步 0.5 人月；對照維護畫面 0.5 人月；原廠聯測、病房實測、上線陪同 1 人月。合計約 6 人月。若老醫採 non-profiled 模式（不送醫囑），減 1 人月；若急診、ICU 與一般病房分屬不同廠牌，加 2 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>住院給藥流程</strong>：醫囑 → 藥局審核 → 藥櫃取藥 → 給藥確認的每一步在 HIS 哪裡發生，藥櫃取藥事件要與「給藥確認」子系統勾稽而不是重複記錄。</li>
+    <li><strong>計費邏輯</strong>：住院用藥是依醫囑計價還是依實際取用計價？藥櫃退藥要不要退費？成大現行規則決定對帳方式，老醫是否相同要 T07 確認。</li>
+    <li><strong>管制藥品管理條例</strong>：管制藥登記簿、簿冊保存年限、盤點與申報格式，藥櫃只是工具，法定責任在藥劑部，HIS 要提供可稽核的完整鏈。</li>
+    <li><strong>老年醫療特性</strong>：長期照護型病房、安寧、失智病房的常備藥與 PRN 用藥比例高，override 與非醫囑取藥情境比急性病房多，例外流程設計要更周延。</li>
+    <li><strong>原廠模式差異</strong>：profiled／non-profiled、藥櫃是否做藥品審核、是否支援 HL7 全套訊息，每家不同。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 入院管理、住院醫囑、住院藥局、給藥確認改寫成 C# 後才有醫囑與 ADT 事件可推送。</li>
+    <li><a href="./T02.html">T02</a> — 藥櫃伺服器端點、病房與櫃體對應、藥碼對照、計費規則皆為院區參數。</li>
+    <li><a href="./T07.html">T07</a> — 老醫病房配置、藥櫃部署位置、運作模式、管制藥流程在需求訪談確認。</li>
+    <li><a href="./M03.html">M03</a> — 管制藥存取紀錄、帳號權限同步、稽核紀錄保存均屬資安合規範圍，設計需先符合防護基準。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T15.html">T15</a> — 需部署介接服務、開通藥櫃伺服器連線、建立帳號同步。</li>
+    <li><a href="./T16.html">T16</a> — 老醫病房開放即需藥櫃可用；管制藥若無法從藥櫃取用，病房將退回人工簿冊。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>需要。HIS 對象是原廠藥櫃伺服器，但驗收要在實體櫃體上完成取藥事件的端到端測試。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>智慧藥櫃伺服器（cabinet server）</td><td>國際大廠：HL7 v2 over MLLP（ADT、RDE、DFT）；國產：介接資料表、REST／SOAP API 或檔案。規格未載明，需確認</td><td>藥櫃原廠（介面規格書、訊息範例、錯誤碼）；成大藥劑部／資訊室 HIS 組（若已有介接）</td><td>原廠測試伺服器或模擬器；至少一台實體櫃體（老醫交機後或原廠展示機）做端到端取藥測試</td></tr>
+      <tr><td>櫃體使用者認證（員工證 RFID、指紋、密碼）</td><td>由原廠櫃體處理；HIS 只同步使用者主檔（AD／LDAP 或介接表）</td><td>原廠；資訊室（AD 結構）</td><td>測試帳號與測試卡片</td></tr>
+      <tr><td>管制藥抽屜／冷藏櫃</td><td>同伺服器介面，事件多帶見證者欄位</td><td>原廠</td><td>雙人見證測試情境</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>成大／斗六是否已有智慧藥櫃？若有，現行 VB.Net 介接程式、介面規格、計費對帳規則與廠牌</td><td>資訊室 HIS 組、藥劑部資訊窗口</td><td>有樣板可省一半設計；若成大沒有，這是三院第一套，所有流程都要從零定義。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>老醫藥櫃廠牌、型號、台數、部署病房、運作模式（profiled／non-profiled）、交機日期</td><td>老人醫院籌備處、採購組</td><td>廠牌決定協定，模式決定要不要送醫囑；交機日決定真機測試時程。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>原廠介面規格書、HL7 訊息範例或 API 文件、測試伺服器／模擬器、聯測窗口</td><td>藥櫃原廠（院方依貳-二-(二)引介）</td><td>沒有規格無法開發；沒有測試伺服器只能等真機。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老醫管制藥管理流程與稽核需求：雙人見證、盤點頻率、簿冊格式、食藥署申報方式</td><td>老人醫院籌備處藥劑部、護理部</td><td>法定要求；介接若少存一個欄位，簿冊就不合規。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>住院用藥計費規則：依醫囑或依取用計價、退藥退費、override 如何入帳</td><td>成大住院藥局、批價／健保組、老醫籌備處</td><td>決定對帳邏輯；錯了就是健保申報錯誤。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>藥櫃使用者身分來源：AD／認證授權系統結構、員工證卡號、護理師執照欄位、停權流程</td><td>資訊室、人事室、護理部</td><td>帳號不同步就無法取藥，或離職者仍能取管制藥（M03 風險）。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>老醫病房至藥櫃伺服器與 HIS 的網段、防火牆、伺服器放置位置（老醫或總院 DC）</td><td>資訊室 DC 組</td><td>T15 部署前需確定。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>成大可能沒有既有藥櫃介接</strong> — 若這是三院第一套，計費、對帳、管制藥流程都要和藥劑部、護理部、批價組從頭談，需求時間會壓縮開發時間。</li>
+    <li><strong>設備採購與交機時程</strong> — 與 H03 相同，老醫硬體另案採購；真機測試可能落到 Phase 3。</li>
+    <li><strong>計費與庫存對不上</strong> — 藥櫃事件與 HIS 醫囑計價雙軌並行時，退藥、override、盤損容易造成帳務差異，上線初期需人工對帳機制。</li>
+    <li><strong>管制藥合規</strong> — 存取紀錄不完整或帳號同步失效就是稽核缺失；M03 的存取紀錄保存與此任務綁定。</li>
+    <li><strong>原廠訊息支援不全</strong> — 部分機種只支援名單同步不支援醫囑（等同 non-profiled），院方期待與設備能力可能落差。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>成大醫院目前是否有智慧藥櫃？哪家？介接方式？（規格未載明，需確認）</li>
+    <li>老醫藥櫃部署範圍：一般病房、ICU、急診、手術室？各幾台？</li>
+    <li>採 profiled（依醫囑取藥）或 non-profiled 模式？藥局審核是否為取藥前提？</li>
+    <li>取藥事件是否直接產生計費，還是仍以醫囑計價、藥櫃事件只做庫存與稽核？</li>
+    <li>藥櫃事件是否要與「給藥確認」子系統勾稽（取藥 ≠ 給藥）？</li>
+    <li>管制藥簿冊由藥櫃原廠系統產出還是 HIS 產出？食藥署申報從哪裡出？</li>
+    <li>使用者認證用員工證、指紋還是帳密？帳號來源是 AD 還是 HIS 認證授權系統？</li>
+    <li>驗收標準：訊息往返即可，還是要在實體櫃體完成入院→醫囑→取藥→計費→退藥全流程？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

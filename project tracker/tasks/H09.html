@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H09 住院健檢系統儀器介接 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · hardware</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">H09</div>
+  <h1>住院健檢系統儀器介接（於使用者電腦定期執行之批次程式）</h1>
+  <p class="lede">老人醫院的住院健檢中心會有一批檢測儀器（體組成、骨密、心電圖、肺功能、眼壓、聽力、視力、動脈硬化等），儀器各自把結果吐成檔案或走 serial/USB 到一台使用者電腦；規格要求我們寫一支「在使用者電腦上定期執行的批次程式」把這些結果收集、解析、對應到住院健檢報告項目後推回 HIS。它是九個「須開發」介接中唯一跑在 client PC 而非伺服器上的，也是唯一沒有單一原廠 SDK 的——每台儀器都是一個獨立的小介接。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-yes">有（多台健檢儀器）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 5 人月（儀器數未定）</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> · <a href="./T02.html">T02</a> · <a href="./X01.html">X01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T15.html">T15</a> · <a href="./T16.html">T16</a> · <a href="./T08.html">T08</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)-9、貳-一-(二)-7、貳-二-(二)</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(三)「老人醫院 HIS 跨平台外部介接開發與內部跨系統介接測試」，須開發的外部介接介面程式第 9 項：「<strong>住院健檢系統儀器介接（於使用者電腦定期執行之批次程式）</strong>」。</p>
+    <p>貳-一-(二)-7 數據整合中台：「能銜接原本在成大醫院的住院健檢資料（<strong>帶出受檢者歷年受檢資料與報告為住院健檢系統原有核心功能</strong>）」。</p>
+    <p>貳-二-(二)：「老人醫院所需介接的院內其他系統……本院會請相關單位或廠商提供標準介接說明供得標廠商開發。」</p>
+    <p>附錄子系統清單：「住院健檢系統」列於<strong>門診</strong>分類下（與「門診健檢系統」並列），屬 T01 改寫範圍。</p>
+  </blockquote>
+  <p>規格只有一行。儀器種類、數量、廠牌、輸出格式、現有批次程式是否存在、是否可沿用，一概<strong>規格未載明，需確認</strong>。此外 X01 的 #34–#36（住院健檢身心狀況自評表／營養評估表／營養訂餐）是同一個健檢流程的三個「須測試」介接，本頁一併考量。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>我們的假設：成大現有住院健檢中心已經有一支類似的批次程式（VB.Net 或 VB6，可能是某位資訊室同仁寫的本機獨立程式——正是規格 貳-一-(一)-1 說「之後盤點」的那類），它在健檢中心的一台 PC 上用 Windows 工作排程器每隔幾分鐘掃描儀器輸出資料夾，把結果寫進 HIS 的健檢結果表。老人醫院會採購一批新儀器（不一定同廠牌），所以要「開發」而不是「測試」。</p>
+  <pre class="diagram">
+  健檢中心（老人醫院）使用者電腦（Windows 10/11，院方 Client 端標準環境）
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  儀器                    取得方式          Adapter（每台一支）            │
+  │  ┌──────────┐  檔案輸出   ┌─────────┐    ┌────────────────────────┐    │
+  │  │ 體組成分析 │──────────▶│ Watch   │───▶│ InBodyAdapter (CSV)     │    │
+  │  │ 骨密度    │──────────▶│ Folder  │───▶│ DxaAdapter (XML/PDF)    │    │
+  │  │ 肺功能    │──────────▶│ /Share  │───▶│ SpiroAdapter (CSV)      │    │
+  │  └──────────┘            └─────────┘    └───────────┬────────────┘    │
+  │  ┌──────────┐  RS-232/USB ┌─────────┐              │                  │
+  │  │ 心電圖    │──────────▶│ Serial  │───▶ EcgAdapter (原廠SDK/HL7?)      │
+  │  │ 眼壓/視力 │──────────▶│ Listener│───▶ TonoAdapter (ASCII 行協定)      │
+  │  │ 聽力     │──────────▶│         │───▶ AudioAdapter                    │
+  │  └──────────┘            └─────────┘              │                  │
+  │                                                    ▼                  │
+  │        ┌──────────────────────────────────────────────────────┐       │
+  │        │ 批次核心  hc-collector.exe（C#, .NET, 排程器每 N 分鐘）  │       │
+  │        │  1. 病患比對：儀器上的 ID/條碼 ⇄ 健檢序號/病歷號        │       │
+  │        │  2. 項目對應：儀器欄位 ⇄ 健檢報告項目碼 + 單位 + 參考值   │       │
+  │        │  3. 本機佇列 (SQLite/檔案)：離線暫存、重送、去重         │       │
+  │        │  4. 稽核 log、失敗檔搬到 error/ 並通知                   │       │
+  │        └──────────────────────────┬───────────────────────────┘       │
+  └───────────────────────────────────┼───────────────────────────────────┘
+                                      │ HTTPS / WCF（T04 規範）
+                                      ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │ HIS 後端（C#, T01）  住院健檢系統 API                            │
+  │  UploadInstrumentResult(院區, 健檢序號, 項目碼, 值, 儀器, 時間) │
+  │      ▼                                                       │
+  │  住院健檢結果表 ──▶ 健檢報告產生 ──▶ 歷年報告查詢（T08 銜接成大歷史）│
+  │      ▲ #34 身心自評表  ▲ #35 營養評估表  ▲ #36 營養訂餐 (X01)   │
+  └──────────────────────────────────────────────────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>Adapter 層</strong>：每台儀器一個實作，介面統一 <code>IInstrumentAdapter { Poll(); Parse(raw) → List&lt;Measurement&gt; }</code>。檔案型儀器用資料夾監看（FileSystemWatcher 不可靠，改為排程輪詢 + 已處理清單）；serial 型用 SerialPort 讀 ASCII 行協定；有原廠 SDK（心電圖常見）的則包 SDK。新增儀器＝新增一個 adapter 類別＋一組對應表，不改核心。</li>
+    <li><strong>病患比對</strong>：儀器端通常只有操作員手 key 的 ID 或條碼。要定義老人醫院健檢流程：受檢者掛健檢序號 → 列印條碼 → 儀器掃碼；比對失敗的結果進待處理清單由健檢人員手動配對，不能靜默丟棄。</li>
+    <li><strong>項目對應表</strong>：儀器欄位 → 住院健檢報告項目碼。這張表必須是 HIS 設定表（T02 的參數化精神），不是寫死在程式裡；成大與老醫的儀器不同，對應表隨院區。</li>
+    <li><strong>排程與執行方式</strong>：規格明講「定期執行之批次程式」，所以走 Windows 工作排程器 + 主控台程式，而非 Windows Service（Service 需要 admin 安裝，院方 Client 環境通常不給）。程式以一般使用者權限、無互動視窗、可重入（上一輪未完成則跳過）。</li>
+    <li><strong>離線佇列與重送</strong>：PC 與 HIS 之間斷線是常態（網路、HIS 上版）。結果先落地本機（SQLite 或 JSON 檔），上傳成功才標記；以「儀器＋受檢序號＋項目＋量測時間」去重，避免重跑造成重複結果。</li>
+    <li><strong>HIS 端 API</strong>：一個 upload endpoint + 一個查詢「待補項目」endpoint，走 T04 要求的 HTTPS；帳號用裝置服務帳號而非個人帳號。</li>
+    <li><strong>設定與部署</strong>：一個 config 檔（院區代碼、儀器清單、資料夾、COM port、API URL）；部署方式要符合院方 Client 端管理（T15）——很可能是 MSI 或純 xcopy + 排程 XML 匯入。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>核心框架（排程、佇列、log、上傳、設定、部署包）約 25 人日；每台儀器 adapter 含取得樣本、解析、對應、與院方實機測試約 6–8 人日；假設 6–8 台儀器 ≈ 45–60 人日；HIS 端 API 與健檢結果表調整（隨 T01 一起做）約 10 人日；現場安裝與驗收約 10 人日。合計約 100 人日 ≈ <strong>5 人月</strong>。若成大既有批次程式可直接改寫、且老醫儀器與成大同款，可降到 3 人月；若儀器超過 10 台或有需原廠 SDK 的封閉設備，會升到 7 人月以上。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>健檢流程與報告結構</strong>：住院健檢是「住院型」健檢（受檢者住 1–2 晚，跑完全套檢查後由醫師總評），報告項目包含儀器量測值、檢驗（LIS）、影像（PACS）、問卷（#34）、營養評估（#35）。我們要理解哪些項目來自儀器、參考值怎麼依年齡性別判讀、異常標記規則。</li>
+    <li><strong>儀器輸出格式各異</strong>：InBody 類體組成常有 CSV/專用格式且欄位上百個；DXA 骨密可能只有 PDF 或 DICOM SR；心電圖多為原廠格式或 HL7 ORU（有的要買 export 授權）；肺功能 CSV；眼壓/聽力常是 RS-232 ASCII。每一台都要拿到<strong>真實樣本檔</strong>與說明書才能寫。</li>
+    <li><strong>病患身分比對是最大的資料品質風險</strong>：儀器端手 key 錯 ID 會把結果寫到別人報告上。需要流程設計（條碼）加程式端防呆（姓名/性別/出生年月交叉比對）。</li>
+    <li><strong>Client PC 環境</strong>：院方電腦通常受 GPO 管理、無 admin、有防毒與 USB 管制；serial 轉 USB 驅動、資料夾共享權限、排程器權限都可能被擋。這不是技術難，是行政協調難。</li>
+    <li><strong>與成大歷史資料銜接</strong>：T08 要能帶出受檢者在成大歷年的健檢報告，所以老醫的項目碼要與成大一致或可對應，否則歷年趨勢圖對不起來。</li>
+    <li><strong>老人族群特性</strong>：老醫受檢者年長、行動不便，儀器（如骨密、肺功能）操作與量測品質標記（如肺功能配合度）可能需要額外欄位。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 住院健檢系統本身在 T01 的改寫範圍（附錄門診分類）。HIS 端接收 API 與結果表要在 C# 新版上做，否則本任務做完接的是舊 VB.Net 後端，Phase 3 再改一次。</li>
+    <li><a href="./T02.html">T02</a> — 儀器對應表、資料夾、院區代碼都應是院區參數，靠 T02 的設定表機制（PUB_Config 擴充或新表）。</li>
+    <li><a href="./X01.html">X01</a> — #34–#36 三個健檢表單介接與本任務共用健檢序號、報告產生流程；需一起在健檢流程層級做整合測試。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T15.html">T15</a> — 老醫 Client 端環境設定需納入健檢 PC 的排程程式、驅動、資料夾權限。</li>
+    <li><a href="./T16.html">T16</a> — 老醫健檢中心開業前必須可用；回饋成大時若成大也換此程式，需再對成大儀器做 adapter。</li>
+    <li><a href="./T08.html">T08</a> — 中台銜接成大住院健檢歷史資料，依賴本任務定義的項目碼一致性。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>本任務就是硬體介接。下表是<strong>依一般住院健檢中心配置推測</strong>的儀器清單，實際清單規格未載明，需向院方確認（成大現況 + 老醫採購計畫）。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>體組成分析儀（InBody 類）</td><td>CSV/專用格式檔案輸出至資料夾或 USB；部分型號 RS-232/LAN</td><td>儀器原廠／代理商；匯出格式說明書</td><td>老醫實機或成大同款；10 筆以上真實匿名樣本檔</td></tr>
+      <tr><td>骨密度儀（DXA）</td><td>PDF／DICOM SR／CSV；常需原廠 export 模組</td><td>原廠（Hologic/GE 類）；export 授權可能另購</td><td>確認是否有結構化輸出，否則只能存 PDF 連結</td></tr>
+      <tr><td>心電圖機（12 導程）</td><td>原廠格式（XML/專用）、HL7 ORU、或 ECG 管理系統匯出；部分需 SDK</td><td>原廠／代理商 SDK 與授權</td><td>樣本檔＋判讀文字格式；確認是否經院內 ECG 管理系統而非直連</td></tr>
+      <tr><td>肺功能儀</td><td>CSV/文字檔匯出；RS-232</td><td>原廠</td><td>樣本檔；FVC/FEV1 等欄位定義</td></tr>
+      <tr><td>眼壓計／視力計／自動驗光</td><td>RS-232 ASCII 行協定（常見）、USB-serial</td><td>原廠說明書（通常是幾頁 ASCII 協定）</td><td>實機＋USB-serial 線；COM port 權限</td></tr>
+      <tr><td>聽力計</td><td>RS-232 或專用軟體匯出檔</td><td>原廠</td><td>樣本檔</td></tr>
+      <tr><td>血壓計／身高體重計／動脈硬化(ABI/PWV)</td><td>RS-232、藍牙或列印口攔截</td><td>原廠</td><td>確認是否要納入（規格未載明）</td></tr>
+      <tr><td>健檢中心使用者電腦</td><td>Windows、工作排程器、一般使用者權限、防毒、GPO</td><td>資訊室 Client 端管理（T15）</td><td>一台與正式同規格的 PC 與帳號，可裝驅動與排程</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>成大住院健檢中心現有儀器清單（廠牌、型號、輸出方式）＋老人醫院健檢儀器採購清單或計畫</td><td>健檢中心、老人醫院籌備處、採購組</td><td>儀器數量直接決定 adapter 數量與工作量；不知道清單無法估、無法排程。老醫若尚未採購，連介面都不存在。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>成大現有「儀器介接批次程式」原始碼、排程設定、設定檔與部署方式</td><td>資訊室 HIS 組</td><td>確認是否存在、用什麼語言、對應表在哪；有則改寫，沒有則從零開始，差 2 人月。這類本機獨立程式規格說「之後盤點」，要主動要。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>住院健檢系統的資料表結構（健檢序號、結果表、項目碼主檔、報告樣板）</td><td>資訊室 HIS 組</td><td>沒有項目碼主檔就無法做對應表，也無法與 T08 歷史資料對齊。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>每台儀器的真實輸出樣本檔（去識別化）、原廠介面說明書、需要的 SDK 與授權</td><td>健檢中心、各儀器原廠／代理商</td><td>沒有樣本檔只能憑說明書猜，上線才發現欄位不符。原廠 export 模組若需付費須提早由院方採購。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老醫健檢流程設計（受檢者識別／條碼、儀器操作 SOP、報告產出時點）</td><td>健檢中心護理長／老人醫院籌備處（T07 訪談）</td><td>病患比對機制取決於流程；流程不定，程式無從防呆。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方 Client 端 PC 標準環境說明（OS 版本、GPO、防毒、是否允許排程器／USB-serial 驅動／服務帳號）</td><td>資訊室 Client 端／DC 組</td><td>決定用排程器或服務、部署包格式；被 GPO 擋住就上不了線。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>#34–#36 三個健檢表單系統的介面說明與負責單位</td><td>資訊室 HIS 組、營養部</td><td>要與儀器結果一起整進同一份報告；見 X01。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>儀器清單不存在或未定</strong> — 老醫尚在建置，儀器可能在 Phase 2 後段才採購、甚至到 Phase 3 才到貨；程式寫好了沒實機可測。需在工作計畫書（M01）明訂「儀器到貨日」為院方義務與時程前提。</li>
+    <li><strong>原廠不給格式或要收費</strong> — 骨密、心電圖類設備的結構化輸出常需額外授權模組；規格說院方會「請相關單位或廠商提供介接說明」，但沒說費用誰出。若原廠不配合，該儀器只能存 PDF，報告無法帶結構化值。</li>
+    <li><strong>Client PC 政策</strong> — 無 admin、USB 管制、防毒隔離自製 exe；每一項都要走院方例外申請流程，時程不可控。</li>
+    <li><strong>病患錯配</strong> — 結果寫到錯的受檢者是醫療品質事件。防呆與人工配對介面必須列入範圍，不能只做「自動上傳」。</li>
+    <li><strong>與成大項目碼不一致</strong> — 若老醫自訂新項目碼，T08「歷年報告」功能會斷；需先與健檢中心協議共用主檔。</li>
+    <li><strong>範圍蔓延</strong> — 健檢中心可能順勢要求「順便」做報告排版、問卷平板、預約等；規格只涵蓋儀器介接，其他走變更管理。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>老醫住院健檢中心的儀器清單、數量、到貨時程？是否與成大同款（可重用 adapter）？</li>
+    <li>成大現有儀器介接程式是否存在？語言？是否有人維護？是否已在規格「之後盤點」的本機程式清單內？</li>
+    <li>批次程式跑在哪台 PC、由誰維運、當機誰通知？是否允許改為常駐服務？</li>
+    <li>儀器上的受檢者識別用什麼（健檢序號、病歷號、條碼）？誰負責掃碼／key in？</li>
+    <li>心電圖是否直接介接儀器，還是院內已有 ECG 管理系統（那就變成 X01 類的系統介接）？</li>
+    <li>骨密、超音波等只出 PDF/DICOM 的設備，是否要走 PACS（H04）而非本任務？</li>
+    <li>健檢報告的項目碼主檔與參考值由誰維護？成大與老醫是否共用？</li>
+    <li>成大醫院是否也要換用此新程式（Phase 3 回饋）？若是，成大儀器也要納入 adapter 範圍與工作量。</li>
+    <li>原廠 SDK／export 模組費用由院方採購還是含在本案？</li>
+    <li>#34 身心自評表是否為平板／Web 問卷，#36 營養訂餐是否即住院營養供膳系統的一部分（與 T13 跨院供膳統計重疊）？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "id": "H04",
+  "title": "PACS 系統介接（開發）",
+  "phase": 2,
+  "category": "hardware",
+  "hardware": "partial",
+  "domain_difficulty": 4,
+  "tech_difficulty": 4,
+  "effort_pm": 6,
+  "depends_on": ["T01", "T02", "T07"],
+  "summary": "開發老人醫院 HIS 與 PACS／RIS 的放射科工作流介接：檢查醫令以 HL7 ORM 下送、accession number 對應 DICOM Modality Worklist、影像／報告狀態回收、viewer 啟動；老醫 PACS 是否獨立、有無 RIS 規格未載明。",
+  "urgent_asks": [
+    {"what": "成大現行 HIS↔PACS／RIS 介接程式（VB.Net）原始碼、HL7 訊息規格與對照表、現行 PACS 廠牌", "from": "資訊室 HIS 組、影像醫學部資訊窗口", "why": "最直接的樣板；沒有就無法判斷可沿用多少與需要哪些訊息型別", "priority": "P0"},
+    {"what": "老醫 PACS 架構決策：獨立或共用總院 PACS、有無 RIS、報告系統為何、廠牌與建置時程", "from": "老人醫院籌備處、影像醫學部、資訊室", "why": "決定接 HL7 還是要自建 DICOM MWL，工作量差 2 人月以上；未定無法設計", "priority": "P0"},
+    {"what": "PACS 原廠 HL7／DICOM conformance statement、介接說明、測試環境與聯測窗口", "from": "PACS 原廠（院方依貳-二-(二)引介）", "why": "沒有規格無法寫訊息；沒有測試環境只能在正式 PACS 上測", "priority": "P0"},
+    {"what": "檢查單號（accession）與院區碼規則、檢查項目主檔與 PACS procedure code 對照", "from": "資訊室 HIS 組、影像醫學部", "why": "三院一套 HIS 後號碼衝突會讓影像掛錯病人", "priority": "P1"},
+    {"what": "檢查報告系統（#27）介面文件與測試環境", "from": "影像醫學部、報告系統廠商", "why": "報告回收與 X01 測試共用，晚拿到會擠到 Phase 2 尾端", "priority": "P1"},
+    {"what": "viewer 啟動方式與認證機制（token／AD SSO）、client 端安裝需求", "from": "PACS 原廠、資訊室", "why": "牽涉 M03 帳號與存取紀錄；T15 client 環境需提前知道", "priority": "P1"},
+    {"what": "老醫儀器清單（modality 種類、台數、廠牌）與放射科人力配置", "from": "老人醫院籌備處", "why": "決定聯測範圍與報告流程（無駐診放射科醫師則報告可能在總院打）", "priority": "P2"}
+  ],
+  "blockers": [
+    "老醫 PACS 架構（獨立／共用、有無 RIS）未定，直接決定介接範圍與是否需自建 DICOM worklist",
+    "PACS 原廠常將 HL7 介接調整視為另案收費，規格未要求原廠陪測",
+    "老醫與總院共用 PACS 時 accession／病歷號跨院衝突會造成影像歸戶錯誤",
+    "多數 PACS 狀態回收不完整（無 MPPS），HIS 檢查狀態機需容忍缺步驟",
+    "缺 PACS 測試分區與模擬儀器就無法迴歸測試，需與 T15 測試環境一併規劃"
+  ],
+  "contacts": ["資訊室 HIS 組", "影像醫學部資訊窗口", "老人醫院籌備處", "PACS 原廠", "檢查報告系統廠商", "資訊室 DC 組"],
+  "open_questions": [
+    "老醫 PACS 是獨立系統還是總院 PACS 延伸？影像伺服器放哪裡？",
+    "老醫有無 RIS？worklist 由 PACS 提供還是要 HIS 提供？",
+    "#27 檢查報告系統是否僅放射科，還是含內視鏡、超音波、心電圖？報告以內容還是連結回 HIS？",
+    "HL7 版本與訊息型別、字元編碼、是否有 Z-segment？",
+    "病人資料異動（改名、合併病歷）目前如何同步到 PACS？",
+    "轉檢／代檢在總院照的影像如何回到老醫 HIS？兩院 PACS 是否互通？",
+    "viewer 需嵌入 HIS 畫面還是外開視窗？",
+    "驗收標準：訊息往返即可，還是開單到儀器 worklist、影像、報告全流程真機驗證？"
+  ]
+}

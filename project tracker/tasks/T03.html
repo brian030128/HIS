@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T03 舊架構優化與效能 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · core</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T03</div>
+  <h1>舊架構優化與效能</h1>
+  <p class="lede">兩件事：把現行「檢核系統」（醫囑／批價／掛號等作業前的規則檢查）重做成一個易於新增規則、可量測效能的檢核引擎；把 15 年來各子系統各自複製的共用元件與底層元件（資料存取、Logging、訊息、列印、IC 卡、日期／字串工具）收斂為一套。規格只給了目標沒給指標——「提升效能」提升到多少、跟什麼比，<strong>我們必須先拿到現況數字才能承諾</strong>。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 · 300 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 40 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T06.html">T06</a> <a href="./T08.html">T08</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(一)-3、壹-四-1</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(一)-3：「改善原程式老舊架構與提升效能：優化既有檢核系統的程式碼與效能，且易於新增規則；優化共用元件、底層元件。」</p>
+    <p>壹-四-1：「……以達到一致性、擴充性及易於維護的目標。」貳-三-5：「程式調整完成後，需模擬新版本運作環境進行完整測試。」</p>
+  </blockquote>
+  <p>「檢核系統」是什麼、有幾支程式、規則有多少條、目前效能瓶頸在哪裡——<strong>規格未載明，需確認</strong>。從附錄子系統推測，檢核至少涵蓋：門診／住院／急診醫囑檢核（劑量、重複用藥、交互作用、過敏、年齡性別）、健保給付規範檢核（事前審查、用藥天數、檢查頻率）、批價檢核、掛號檢核（重複掛號、停診）。「效能」的目標值也未載明。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>檢核引擎放在服務端（配合 T04 把邏輯與 SQL 移到後端），規則以「規則目錄表 + 規則實作」兩層管理：規則的啟用／停用、嚴重度、適用院區、適用科別是資料（院方可自己改）；規則的判斷邏輯是 C# 類別（有型別、可單元測試）。引擎負責載入、排序、短路、快取參考資料、計時與記錄，讓「新增一條規則」= 寫一個類別 + 在目錄表加一列。</p>
+  <pre class="diagram">
+ Client (C# WinForms)                 HIS.Services (WCF)
+┌──────────────────┐   Validate(ctx,  ┌─────────────────────────────────────────────┐
+│ 醫囑 / 批價 / 掛號 │ ───────────────▶ │ RuleEngine.Evaluate(RuleSet, Subject)       │
+│ 畫面只顯示結果    │ ◀─────────────── │  1. 由 RULE_CATALOG 載入啟用規則 (快取)      │
+└──────────────────┘   Result[]        │  2. 依 CampusContext(T02) 篩院區 / 科別      │
+   (Severity, Code,                    │  3. 依 Priority 排序，Block 級可短路          │
+    Message, RuleId)                   │  4. 平行取參考資料 (藥檔/健保規範/病人資料)   │
+                                       │  5. 逐條執行 IRule.Check() → RuleResult     │
+                                       │  6. 每條計時 → RULE_METRICS (效能可觀測)     │
+                                       └───────┬─────────────────────┬───────────────┘
+                                               │                     │
+                            ┌──────────────────▼───┐   ┌─────────────▼──────────────┐
+                            │ HIS.Rules (C# 類別)   │   │ HIS.Common / 共用底層元件    │
+                            │ IRule                 │   │ Data (T04) · Logging · Cache │
+                            │  DrugAllergyRule      │   │ Messaging · Printing · IcCard│
+                            │  NhiDosageDaysRule    │   │ DateTime/ROC 民國年 · Text   │
+                            │  DuplicateRegRule …   │   │ 取代各子系統各自的複本       │
+                            └───────────────────────┘   └────────────────────────────┘
+ RULE_CATALOG: RuleId, Name, Category, Severity(Block/Warn/Info),
+               Enabled, CampusScope, DeptScope, Priority, EffectiveFrom/To, Version
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>IRule 介面</strong>：<code>RuleResult Check(RuleContext ctx)</code>，RuleContext 帶病人、醫囑／處方、CampusContext、已快取的參考資料。規則不自己查 DB，需要的資料由引擎統一預載——這是效能的主要來源（現行推測是每條規則各自下 SQL，N 條規則 = N 次來回）。</li>
+    <li><strong>RULE_CATALOG 表</strong>：規則的開關、嚴重度、院區／科別範圍、生效期間。健保規範改版時，多數情況只改參數列（天數、上限）不改程式；真的要新邏輯才寫類別。院區差異透過 T02 的 CampusScope 表達，不在規則內判斷院區。</li>
+    <li><strong>執行策略</strong>：Block 級規則先跑並可短路；Warn／Info 級批次跑；同一次檢核的參考資料快取在請求範圍；藥檔、健保規範等慢變資料用服務端記憶體快取 + 版本號失效。</li>
+    <li><strong>可觀測性</strong>：每條規則每次執行記錄耗時與結果（取樣或聚合），上線後才知道哪條規則慢、哪條規則從沒觸發過（可以刪）。這也是 M04 保固期季報的素材。</li>
+    <li><strong>相容期</strong>：舊檢核邏輯逐條搬進新引擎時，用「影子模式」——新舊引擎同時跑、只採舊結果、記錄差異；差異歸零才切換。醫囑檢核是病安關鍵，不能靠測試案例覆蓋率賭。</li>
+    <li><strong>共用／底層元件收斂</strong>：先用靜態掃描找出重複程式碼（clone detection，預估數十組重複 500 行以上的工具函式），歸到 <code>HIS.Common</code> 一套；重點是民國年日期處理、字串補零／全半形、金額四捨五入（健保點數規則）、IC 卡 wrapper、列印範本、Logging（現行推測各自寫檔）。每一組收斂都要有單元測試，因為改工具函式等於同時改幾百支程式。</li>
+  </ul>
+  <h3>效能基準（我們現在沒有數字）</h3>
+  <p>「提升效能」在驗收時要有可比較的量測，否則就是主觀。我們需要在轉換前先量現況：</p>
+  <ul>
+    <li>尖峰時段（上午門診 9–11 點）掛號、開立醫囑、批價、IC 卡讀寫、住院醫囑核對的端到端回應時間（P50／P95）與每分鐘交易量。</li>
+    <li>WCF 服務端每個作業的呼叫次數與耗時（IIS log／WCF tracing 或 APM）。</li>
+    <li>SQL Server 端：Top 50 耗時查詢、等待統計、索引缺失、資料表大小；stored procedure 執行統計。</li>
+    <li>檢核相關：每次醫囑檢核跑幾條規則、下幾次 SQL、耗時多久。</li>
+    <li>院方目前的效能抱怨清單（哪些畫面使用者覺得慢）。</li>
+  </ul>
+  <p>建議在工作計畫書（M01）內定義驗收指標為「同硬體、同資料量下，指定 20 個關鍵作業 P95 回應時間不劣於現況，其中檢核類作業改善 ≥ 30%」——數字要等基準量完才能定，但格式現在就要跟院方談好。</p>
+  <h3>工作量怎麼估的</h3>
+  <p>檢核引擎核心（介面、目錄表、快取、影子模式、量測）約 8 人月；既有規則盤點與搬遷（假設 200–400 條規則，含影子驗證，每條 0.5–1 人日）約 12 人月；共用元件收斂（掃描、歸併、單元測試、替換呼叫點）約 12 人月；效能基準量測、SQL／索引調校、壓力測試環境與回歸約 8 人月。合計約 40 人月。若規則數超過 600 條或現行檢核邏輯散在 Client 端（每支 Form 自己檢），搬遷工作量會再增加，且會跟 T01 每支程式的轉換綁在一起。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>用藥安全規則</strong>：劑量上限、腎功能調整、交互作用、過敏、重複用藥、懷孕／年齡禁忌——資料來源（藥檔、交互作用資料庫是自建還是外購？）與規則的臨床依據，需要臨床藥師確認每條規則搬遷後語意不變。</li>
+    <li><strong>健保給付規範</strong>：健保署的支付標準與審查注意事項每季改，規則要能以參數改版而非改程式；要懂申報端在哪些點會被核刪，才知道哪些檢核是「必須 Block」。</li>
+    <li><strong>效能工程</strong>：SQL Server 查詢計畫、鎖等待、WCF 序列化成本、WinForms UI 執行緒阻塞；也要懂醫院尖峰型態（門診上午、住院交班時段、月底申報批次）。</li>
+    <li><strong>病安風險</strong>：檢核改壞了不會當機，會讓不該開的藥開出去。影子模式與臨床參與不是選項，是必要條件。</li>
+    <li><strong>15 年程式碼的共用元件考古</strong>：同一個函式有五個版本、行為各微妙不同（例如四捨五入方式），收斂時要決定哪一個是「對的」，而且每個版本都可能有人依賴它的錯誤行為。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 檢核引擎與共用元件的<strong>介面</strong>要在 T01 量產轉換前凍結（設計 gate），但規則搬遷與共用元件替換呼叫點是隨每支程式轉換一起做的，所以 T03 的完成依賴 T01 進度。T03 不可能在 T01 之前完成。</li>
+    <li>（非正式）<a href="./T02.html">T02</a> — 規則的院區範圍用 T02 的 CampusContext 表達。</li>
+    <li>（非正式）<a href="./T04.html">T04</a> — 檢核引擎在服務端，資料預載走 T04 的資料存取層。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T06.html">T06</a> — 斗六／成大上線前的整合測試要包含影子模式歸零與效能驗收。</li>
+    <li><a href="./T08.html">T08</a> — 數據整合中台要「保護核心 HIS DB、讀寫分離」，T03 量出的效能基準與 Top 耗時查詢，就是 T08 決定哪些查詢該分流到中台的依據。</li>
+    <li><a href="./M04.html">M04</a> — 保固期季維護報告需要引擎的量測資料。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無。但共用元件收斂會碰到 IC 卡 wrapper 與列印元件，這兩者的重構須在實機（讀卡機、院內印表機）上回歸測試；壓力測試需要一組與正式環境同級的測試環境（貳-三-5 要求模擬新版本運作環境）。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>效能測試環境（伺服器、DB、網路）</td><td>—</td><td>資訊室 DC 組</td><td>與正式環境同級的硬體與資料量，才能比較基準</td></tr>
+      <tr><td>IC 卡讀卡機（共用元件回歸）</td><td>健保署讀卡機 API</td><td>健保署／院方</td><td>實機與測試卡</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>完整原始碼（同 T01 P0），特別是<strong>檢核系統</strong>的程式、規則清單／規則資料表、stored procedures，以及共用／底層元件的專案與所有被複製的副本</td><td>資訊室 HIS 組</td><td>不知道檢核系統長什麼樣，「易於新增規則」無從設計，規則數量與搬遷工作量無法估。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>現況效能數字</strong>：關鍵作業回應時間、WCF／IIS log、SQL Server DMV 統計（Top 耗時查詢、等待、索引）、尖峰交易量；或授權我們進場量測</td><td>資訊室 DC 組、HIS 組</td><td>沒有基準，「提升效能」無法驗收，也無法在工作計畫書寫出可承諾的指標。這要在改寫前量，改寫後就量不到「舊」的了。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方的效能抱怨清單與已知瓶頸；歷次系統當機／變慢事件紀錄</td><td>資訊室 HIS 組、各使用單位</td><td>決定優化優先順序；使用者體感才是驗收時的真實標準。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>檢核規則的業務 owner（藥劑部、醫事室健保業務、護理部）與規則變更歷史</td><td>資訊室 HIS 組協調各單位</td><td>影子模式的差異要有人裁定「哪個才對」；沒有臨床參與，搬遷結果無法簽核。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>與正式環境同級的測試環境與去識別化的正式資料量級備份</td><td>資訊室 DC 組</td><td>壓力測試與效能比較沒有同級環境就沒有意義。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>藥品交互作用／過敏等參考資料的來源與授權（自建或外購資料庫）</td><td>藥劑部、資訊室 HIS 組</td><td>影響規則預載資料的設計與是否需另行授權。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>沒有效能基準</strong> — 最實際的風險：改寫完成後院方說「沒有比較快」，我們拿不出數字。必須在 T01 動手前完成量測並寫進工作計畫書。</li>
+    <li><strong>檢核邏輯散在 Client 端</strong> — 若現行檢核是每支 Form 各自寫（很可能），搬到服務端引擎等於重寫，且要逐支確認；工作量可能倍增並拖住 T01。</li>
+    <li><strong>病安</strong> — 規則搬遷語意改變是最嚴重的風險類型。影子模式需要正式環境的真實流量或大量歷史醫囑重播，這又需要院方提供去識別化資料的授權（伍-一-5、10）。</li>
+    <li><strong>共用元件的「錯誤即規格」</strong> — 收斂五個版本的四捨五入函式時，有人依賴其中一個的錯誤行為；改對了反而讓某報表對不上帳。</li>
+    <li><strong>效能不是程式問題而是 DB／基礎設施問題</strong> — 若瓶頸在缺索引、DB 主機老舊、網路，語言改寫本身不會變快；而 DB 與硬體不在本案範圍（資安經費由其他案執行、施作工程不需要），要提早釐清誰負責。</li>
+    <li><strong>範圍蔓延</strong> — 「優化共用元件、底層元件」沒有邊界；需在工作計畫書明列收斂清單。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>「檢核系統」具體指哪些程式？規則有幾條？規則目前是程式碼、stored procedure、還是資料表驅動？在 Client 端還是服務端執行？</li>
+    <li>「提升效能」的驗收指標是什麼？院方有無既定目標值？可否接受以「指定關鍵作業 P95 不劣於現況、檢核類改善 ≥ X%」為判準？</li>
+    <li>現行是否有任何 APM、log 集中、SQL 監控工具？可否讓我們進場部署量測？</li>
+    <li>DB 端調校（索引、統計、SP 改寫）是否在本案範圍？DB 主機升級由誰負責？</li>
+    <li>共用元件收斂的範圍：是否包含被其他非 HIS 系統（X01 的 26 個系統）參照的 DLL？改了會不會影響它們？</li>
+    <li>影子模式所需的歷史醫囑重播資料，院方是否同意提供去識別化資料？授權流程？</li>
+    <li>規則目錄表的維護權限與流程：藥劑部可否自行開關規則？需否審核？</li>
+    <li>藥品交互作用等參考資料庫是自建還是外購？授權能否延用？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

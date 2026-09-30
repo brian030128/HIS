@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M02 教育訓練與技術移轉 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Cross-cutting · management</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">M02</div>
+  <h1>教育訓練與技術移轉</h1>
+  <p class="lede">驗收前 16 小時教育訓練、至少 8 場 × 2 小時技術移轉，目標是「本院資訊人員得以承接後續維運，達到完全移轉」。這句話的實質意義是：交付的不是課程，而是一套院方 HIS 組能自己 build、deploy、改、上版的 C# 程式碼庫與文件——包含 Phase 1 與 Phase 3 兩次原始碼交付、與每個版本同步的操作手冊、以及版本管理制度。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Cross-cutting · 集中於 Phase 3 驗收前</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d2"></span> 2/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 10 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a>、<a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./M04.html">M04</a>（保固期院方自行維運的前提）</span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">摘要「教育訓練」；貳-三-7；貳-一-(五)-1；參-二-(二)-3；伍-三-3、6；三階段交付表</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+  <p><strong>摘要「教育訓練」</strong>：驗收前合計 16 小時（技術移轉課程至少 8 場次，每場 2 小時）。</p>
+  <p><strong>貳-三-7</strong>：負責技術移轉教育訓練：最低 8 場次（每場 2 小時），得依專業考量增加，使本院資訊人員得以承接後續維運，達到完全移轉。</p>
+  <p><strong>貳-一-(五)-1</strong>：老人醫院上線環境準備……資訊室 HIS 組協助：基本資料轉置、跨系統連線設定、權限角色設定、Client 端環境設定、教育訓練。</p>
+  <p><strong>參-二-(二)-3</strong>：文件更新管理：版本更新時須做版本管理，同步修正操作手冊及系統文件，並將操作手冊更新至系統上。</p>
+  <p><strong>伍-三-3</strong>：依附表十規定，儲存系統發展生命週期相關文件作為系統文件。<strong>伍-三-6</strong>：軟體或系統發展須進行版本管理，並依資安規範提供權限控管與存取紀錄保存。</p>
+  <p><strong>三階段交付表</strong>：階段一交付「原始程式碼（電子檔）」；階段三交付「教育訓練簽到表與教材、原始程式碼（電子檔）」。</p>
+  </blockquote>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>技轉的成功條件是「院方 HIS 組工程師在我們不在場的情況下，能從 repo 拉下程式碼、建置、部署到測試環境、修一個 bug、上一版、更新手冊」。所以我們把技轉設計成一條「可重複執行的交接管線」，而不是 8 場簡報。</p>
+  <pre class="diagram">
+交付物（電子檔）                           技轉課程（≥8 場 × 2h）
+┌─────────────────────────────┐            ┌────────────────────────────────┐
+│ Git repo（含完整歷史）        │            │ 1 架構總覽：分層、院區參數化    │
+│  ├ src/  門診/急診/住院/共用  │──讀───────▶│ 2 建置與部署 runbook 實作      │
+│  ├ build/  CI 定義、簽章腳本  │            │ 3 院區 Config／Context 機制    │
+│  ├ deploy/ 環境設定、回滾腳本 │            │ 4 檢核引擎新增規則實作         │
+│  ├ docs/                    │            │ 5 中台（CDC/MQ）維運與清檔     │
+│  │  ├ 架構文件（ADR、圖）    │            │ 6 外部介接 H01–H09 除錯        │
+│  │  ├ SA/SD、程式設計書     │            │ 7 T05 同步合併流程（實作）     │
+│  │  ├ 操作手冊（per 版本）   │            │ 8 上線／緊急復原演練           │
+│  │  └ 系統文件（SDLC 佐證）  │            │ +N 使用者操作訓練（各院區）    │
+│  └ CHANGELOG / 版本標籤      │            └───────────────┬────────────────┘
+└──────────────┬──────────────┘                            │
+               │                                           ▼
+               │   ┌────────────────────────────────────────────────┐
+               └──▶│ 驗證：院方工程師獨立完成                          │
+                   │  clone → build → deploy 測試環境 → 修 bug → tag │
+                   │  → 更新操作手冊 → 手冊發布到系統內               │
+                   └──────────────────┬─────────────────────────────┘
+                                      ▼
+                   簽到表 + 教材 + 驗證紀錄 ──▶ 驗收三（D+630）──▶ 保固期（M04）
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>原始碼交付（兩次）</strong>：Phase 1 驗收（D+300）交第一次，Phase 3 驗收（D+630）交最終版。交付形式規格未載明——建議以 Git bare repo 含歷史交付並鏡像到院方指定的版控伺服器；若院方只有檔案伺服器，則交 tag 對應的壓縮檔＋ commit log。兩次交付間的差異需可追溯，這是 <a href="./T05.html">T05</a> 同步合併能否被院方接手的關鍵。</li>
+    <li><strong>建置／部署 runbook</strong>：從乾淨的 Windows 機器 + Visual Studio 2022（貳-二-(一)）到可執行的 HIS，每一步可複製。包含 WCF 服務的 HTTP／HTTPS 憑證設定（<a href="./T04.html">T04</a>）、各院區 Config 的切換（<a href="./T02.html">T02</a>）、批次程式的排程註冊、本機獨立程式的散佈方式。</li>
+    <li><strong>架構文件</strong>：分層圖、院區參數化機制說明、檢核引擎規則新增指引、中台資料流與清檔規則、每個 H 介接的協定摘要與除錯方法。以 ADR（決策紀錄）形式保存「為什麼這樣做」，因為院方接手後會想改。</li>
+    <li><strong>操作手冊「更新至系統上」</strong>（參-二-(二)-3）：意味著手冊要能在 HIS 內部被開啟（例如說明選單連到版本對應的 PDF／HTML），且每次上版同步替換。需要在 <a href="./T01.html">T01</a> 的共用系統中預留「線上說明」入口與版本對應機制，不是事後補。</li>
+    <li><strong>版本管理制度</strong>：分支策略（總院 VB.Net 增修如何進來、三院區共版如何 tag）、release note 格式、權限控管與存取紀錄（伍-三-6）。交接時把制度文件與 repo 權限一起移交。</li>
+    <li><strong>兩種訓練對象</strong>：規格的 8 場是給「本院資訊人員」的技術移轉；但貳-一-(五)-1 的「教育訓練」是老人醫院上線時對使用者（掛號、護理站、藥局等）的操作訓練。後者場次規格未載明，實務上老醫開院前至少數十場，需與籌備處確認由誰主辦。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>約 10 人月：架構文件與 ADR 整理 2、runbook 撰寫與在乾淨環境驗證 1.5、操作手冊（三院區版本差異、線上說明機制）3、8 場技轉課程備課＋授課＋驗證 1.5、版本管理制度與 repo 移交 1、使用者操作訓練支援（假設院方主辦、我方講師）1。若院方要求手冊逐子系統撰寫（67 個子系統），操作手冊這項會膨脹到 8 人月以上——需先確認手冊粒度。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>「完全移轉」的驗證標準不存在</strong>：規格只說「使本院資訊人員得以承接後續維運」，沒有定義考核方式。我們必須自己提出驗證方式（例如院方工程師獨立完成一次 build-deploy-fix-release 循環）並在工作計畫書（<a href="./M01.html">M01</a>）中請院方認可，否則驗收三的技轉項目會變成主觀判斷。</li>
+    <li><strong>院方 HIS 組的 C# 能力現況未知</strong>：他們維護 VB.Net 15 年，改用 C# 後的接手能力決定課程深度。規格未載明，需確認 HIS 組人數、C#／.NET 經驗、是否已用 Git。</li>
+    <li><strong>技術移轉與資安交付重疊</strong>：伍-三-3 要求 SDLC 文件作為系統文件保存、伍-三-6 要求版本管理與存取紀錄——這些文件同時是 <a href="./M03.html">M03</a> 的合規佐證。一份文件兩個用途，格式要同時滿足院方資安承辦與 HIS 組。</li>
+    <li><strong>三院區版本的手冊差異</strong>：院區差異參數化（<a href="./T02.html">T02</a>）之後，同一支程式在三院行為不同；操作手冊要嘛寫三份，要嘛在一份裡標示院區差異。後者維護成本低但需要 T02 的參數清單作為手冊素材。</li>
+    <li><strong>訓練時點被壓在專案最後</strong>：「驗收前 16 小時」加上 Phase 3 的 630 天，技轉場次很可能落在 D+570～D+630 之間，正好與老醫上線、成醫／斗六回饋上線重疊，講師與院方學員都是同一批最忙的人。應把前 4 場（架構、建置、Config、檢核引擎）提前到 Phase 1 驗收後，只留實作類課程到 Phase 3。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 沒有 C# 程式碼庫就沒有技轉標的；架構文件、runbook、線上說明入口都建立在 T01 的分層與共用元件之上。Phase 1 原始碼交付即為第一次技轉素材。</li>
+    <li><a href="./T16.html">T16</a> — 驗收三（教材＋簽到表＋最終原始碼）與三院區上線綁在同一個 630 天里程碑；最終版手冊必須反映老醫版本回饋後的三院共版。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./M04.html">M04</a> — 保固期只有 1 年，之後院方自行維運；技轉不完整會讓保固期變成無止境的免費諮詢（參-二-(二)-5）。</li>
+    <li><a href="./M01.html">M01</a> — 驗收三的交付清單由 M01 彙整，教材與簽到表是其中兩項。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無。教育訓練與技轉本身不接設備。但技轉課程第 6 場「外部介接除錯」需要各 H 任務的測試環境（叫號機模擬器、PACS 測試端點等）可供院方學員操作，這些由 <a href="./H01.html">H01</a>～<a href="./H09.html">H09</a> 提供。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody><tr><td>（無）</td><td>—</td><td>—</td><td>—</td></tr></tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>原始碼交付形式：Git repo（含歷史）或壓縮檔？院方的版控伺服器（Azure DevOps Server／GitLab／TFS）與帳號</td><td>資訊室 HIS 組</td><td>Phase 1（D+300）就要交第一次原始碼；形式不定，T05 的合併流程與後續技轉都無法設計。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>院方 HIS 組接手團隊的名單、人數、C#／.NET／Git 經驗、可投入訓練的時段</td><td>資訊室 HIS 組組長</td><td>決定課程深度與場次；「完全移轉」的對象不明就無法定義驗證標準。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>「完全移轉」的驗收方式：院方是否接受「院方工程師獨立完成 build-deploy-fix-release」作為驗證？</td><td>專案管理人、資訊室 HIS 組</td><td>驗收三的技轉項目若無客觀標準，會變成主觀判斷與缺失來源。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>現行 VB.Net HIS 的操作手冊、系統文件現況與粒度（逐子系統？逐畫面？）、手冊目前放在哪裡、如何「更新至系統上」</td><td>資訊室 HIS 組</td><td>決定手冊工作量（3 vs 8+ 人月）與線上說明入口的設計。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老人醫院使用者操作訓練由誰主辦、場次、場地、時程；是否算在 16 小時內</td><td>老人醫院籌備處、資訊室 HIS 組</td><td>貳-一-(五)-1 的教育訓練與貳-三-7 的技轉是兩件事；若使用者訓練也算我方責任，工作量倍增。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>院方訓練教材與簽到表的制式格式；技轉課程是否需錄影留存</td><td>資訊室</td><td>驗收三交付物；格式不符會被列為缺失。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>院方 HIS 組沒有足夠 C# 人力接手</strong> — 技轉再完整也無法「完全移轉」，保固期後的維運會回流到我方，形同無償延長。</li>
+    <li><strong>技轉時段與 Phase 3 上線衝突</strong> — 講師和學員都是上線期間最忙的人；未提前排課會擠到 D+630 前兩週。</li>
+    <li><strong>操作手冊粒度未定</strong> — 67 個子系統 × 三院區差異，若要求逐畫面手冊，工作量失控。</li>
+    <li><strong>「更新至系統上」需要程式面支援</strong> — 線上說明入口若沒在 T01 早期規劃，Phase 3 才補會動到共用系統。</li>
+    <li><strong>原始碼交付形式與智財歸屬模糊</strong> — 伍-一-14 說機關資料屬機關所有，但未明說程式碼著作權歸屬；若交付 repo 含我方共用函式庫，需先釐清授權（伍-三-4 要求標示非自行開發資源並提供授權證明）。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>16 小時是否僅指技轉 8 場（8 × 2h = 16h），使用者操作訓練另計？（規格未載明，需確認）</li>
+    <li>技轉對象是資訊室 HIS 組全員，還是指定的接手小組？人數？</li>
+    <li>操作手冊是否需三院區各一版？粒度到子系統或到畫面？</li>
+    <li>「將操作手冊更新至系統上」的具體機制：現行 VB.Net HIS 是否已有線上說明功能？</li>
+    <li>原始碼交付是否含 build pipeline、部署腳本、資料庫 schema 與 migration 腳本？</li>
+    <li>程式碼著作權歸屬與我方既有共用元件的授權方式？</li>
+    <li>Phase 1 原始碼交付後，院方是否會自行修改？若會，T05 的合併流程需納入院方分支。</li>
+    <li>技轉課程是否須在院方場地、使用院方環境進行？我方筆電能否連院方測試環境（牽涉 <a href="./M03.html">M03</a> 遠端連線規範）？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T12 跨院檢查排程查詢與預約 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · shared</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T12</div>
+  <h1>跨院檢查排程查詢與預約（老人醫院 ↔ 成大）</h1>
+  <p class="lede">讓老人醫院的醫師開了檢查醫囑後，能直接查成大各檢查科室儀器（CT、MRI、超音波、內視鏡、心導管、核醫……）的排程空檔並替病人預約；反向亦然。老人醫院初期不會有完整的高階影像設備，這個功能會是開院後最高頻的跨院動作。查詢走 T08 中台的「檢查科室儀器排程」副本；預約是寫入，必須以跨院命令進入擁有該儀器的院區「全院排程」／檢查科室系統，由其原生規則（儀器容量、時段長度、顯影劑、禁食、同意書、腎功能）決定。排定後儀器 worklist（經 PACS，H04）與檢查報告系統（#27）都要能對應到跨院病人。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（儀器 worklist 經 H04 PACS）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 10 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T08.html">T08</a> <a href="./T02.html">T02</a> <a href="./T01.html">T01</a> <a href="./T07.html">T07</a> <a href="./T09.html">T09</a> <a href="./H04.html">H04</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T14.html">T14</a> <a href="./T11.html">T11</a> <a href="./T16.html">T16</a> <a href="./X01.html">X01</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(二)-4、貳-一-(二)-7、貳-一-(三)-4、貳-一-(三)-#27</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(二)-4：「查詢及預約老人醫院及成大醫院檢查排程。」</p>
+    <p>貳-一-(二)-7：「……跨院資源共享：掛號資訊、床位資訊、<strong>檢查科室儀器排程</strong>、開刀房手術排程、檢驗抽血、營養供膳等。」</p>
+    <p>貳-一-(二)-6：「提供便利的轉檢與代檢流程機制。」（T14，與本任務高度重疊）</p>
+    <p>貳-一-(三) 須開發之外部介接第 4 項「PACS 系統」；須測試之介接 #27「檢查報告系統」、#19「LIS」。</p>
+    <p>附錄門診子系統含「全院排程」、「科室作業」；醫療共用含「病患就醫資訊整合」。</p>
+  </blockquote>
+  <p>規格用「檢查科室儀器排程」一詞，暗示排程單位是<strong>儀器</strong>（modality）而非科別；但哪些檢查納入（影像？內視鏡？心臟功能？睡眠檢查？）、是否含檢驗抽血（規格另列）、預約是否需先有對方院區醫囑，皆未載明，需在 T07 定案。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>檢查排程與手術排程結構相似，但有兩個關鍵差異：（1）檢查通常需要一張<strong>醫囑（order）</strong>才能排，而醫囑在來源院區開立、執行在目標院區，這正是 T14 轉檢／代檢的核心；（2）排定後必須產生儀器 worklist（DICOM MWL，經 H04 PACS／RIS）讓機台知道要掃誰，而報告要回到來源院區醫師手上（#27）。因此本任務的寫路徑不只是「佔時段」，而是「跨院檢查醫囑＋排程」一組命令。</p>
+  <pre class="diagram">
+老人醫院 HIS：醫師開檢查醫囑 (門診/住院醫囑系統)
+   │ 1. 查：成大 CT/MRI/超音波/內視鏡… 各儀器空檔、時段長度、準備事項
+   ▼
+┌────────────────────────────────┐  CDC   ┌───────────────────────────────┐
+│ T08 中台：檢查科室儀器排程副本   │ ◀───── │ 成大 全院排程 / 科室作業 (核心)  │
+│ 儀器主檔 (modality, 科室, 地點) │ ◀───── │ 老醫 全院排程 / 科室作業         │
+│ 排程格 (slot template, 時長)    │        └───────────────────────────────┘
+│ 已排檢查(去識別化) / 停機維護   │                       ▲
+│ 檢查項目主檔 + 準備事項/禁忌    │                       │ 3b. 原生排程規則
+└────────────────────────────────┘                       │ (儀器容量、時段長度、顯影劑、
+   │ 2. 選 檢查項目+儀器+日期+時段                          │  禁食、同意書、腎功能/eGFR、
+   ▼                                                     │  懷孕、金屬植入物、鎮靜)
+┌────────────────────────────────┐ 3a. ExamBookingCommand ┌───────────────────────────────┐
+│ 跨院檢查預約命令 API (HTTPS)    │ ─────────────────────▶ │ 儀器擁有院區 排程服務           │
+│ idempotencyKey、來源醫囑ID、   │ ◀───────────────────── │ + 建立目標院區檢查醫囑/受檢單   │
+│ 檢查項目碼、臨床資訊、顯影劑、 │ 4. scheduled/rejected  │                               │
+│ 過敏、eGFR、同意書狀態、審計   │    + 準備事項回傳       └───────────────┬───────────────┘
+└────────────────────────────────┘                                        │ 排定後
+   │ 5. 回寫排程結果與準備指示；列印受檢單／通知病人                          ▼
+   ▼                                          H04 PACS/RIS → DICOM MWL → 儀器
+老人醫院 HIS 顯示排定、準備清單、報到資訊            #27 檢查報告系統 → 報告回流來源院區醫師
+                                                     (影像經 H04 PACS 跨院調閱)
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>讀路徑（T08）</strong>：儀器主檔（modality、科室、地點、可做項目）、排程格模板（每台每日時段、每格時長、保留給住院／急診的比例）、已排檢查（跨院視圖去識別化）、停機維護、檢查項目主檔（含準備事項、禁忌、是否需同意書、是否需顯影劑）。成大這些資料在「全院排程」與各「科室作業」子系統，可能不是一張表，需盤點。</li>
+    <li><strong>寫路徑（跨院檢查預約命令）</strong>：<code>ExamBookingCommand{sourceCampus, targetCampus, patientKey, sourceOrderId, examCode, modalityId, slotId, clinicalInfo, contrast, allergy[], eGFR, consentStatus, pregnancy, implants, sedation, idempotencyKey, operator}</code>。目標院區以原生規則排入，並在其 HIS 內建立對應的檢查醫囑／受檢單（否則 RIS/PACS 與報告系統沒有 order 可掛）。狀態：<code>scheduled → checked_in → completed → reported | cancelled | no_show</code>。拒絕碼：時段已佔、儀器停機、禁忌未排除、需先完成 eGFR、需同意書。</li>
+    <li><strong>病人身分</strong>：重用 <a href="./T09.html">T09</a> 的跨院病人索引；PACS 內的病人 ID 與 accession number 需能對回來源院區，否則影像與報告會「找不到人」。</li>
+    <li><strong>報告回流</strong>：檢查報告系統（#27）發報告後，來源院區醫師要能在自己 HIS 看到；走 CDC 進中台，或由 #27 直接推送，需與 X01 協調。</li>
+    <li><strong>院區參數（T02）</strong>：檢查項目碼表（兩院是否同一套？含健保代碼與院內碼）、儀器代碼、排程格規則、準備事項文字。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>約 10 人月：全院排程／科室作業資料模型盤點與 CDC 對應 1.5 人月；跨院儀器排程查詢畫面（modality／日期／時段矩陣、去識別化、準備事項）2 人月；預約命令 API 與擁有院區排程服務封裝（含在目標院區建立檢查醫囑、拒絕碼、idempotency、審計）3 人月；與 H04 PACS worklist、#27 報告回流的欄位對齊與測試 1.5 人月；碼表對照參數化、取消／改期、兩院檢查科聯測 2 人月。與 T14 共用命令與病人索引可省 1–2 人月，前提是兩任務同一組人做。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>儀器容量不是簡單的時段格</strong>：CT 依項目（有無顯影劑、部位）時長不同；MRI 依序列組合；超音波依操作者；內視鏡依是否麻醉；核醫依藥物到貨與半衰期。排程格模板每台儀器不同，且技術師會人工調整。</li>
+    <li><strong>準備事項與禁忌</strong>：禁食（含糖尿病用藥調整）、停用 metformin、顯影劑過敏史、eGFR 門檻、懷孕、金屬植入物／心律調節器（MRI）、鎮靜需家屬陪同。跨院預約時病人不在目標院區，準備指示必須隨排程結果回到來源院區並印給病人。</li>
+    <li><strong>同意書</strong>：顯影劑、鎮靜、侵入性檢查需同意書；在哪院簽、電子同意書能否跨院、紙本如何流轉。</li>
+    <li><strong>醫囑歸屬與健保申報</strong>：老人醫院開立、成大執行的檢查，健保申報由誰申報？費用如何拆？這是 T14 轉檢／代檢的核心問題，但本任務的命令欄位設計必須先知道答案（例如需要「代檢」標記與費用歸屬碼）。</li>
+    <li><strong>住院 vs 門診檢查</strong>：住院檢查有優先權與病房運送安排；跨院住院病人（老人醫院住院、到成大做檢查）牽涉救護車／交通與「暫離院」規則。</li>
+    <li><strong>老人醫院特性</strong>：高齡病人 eGFR 常偏低、多重用藥、行動不便、需家屬陪同；跨院檢查的準備事項與交通需特別考慮，訪談時要問是否需「整批跨院檢查日」的排程模式。</li>
+    <li><strong>影像與報告回流</strong>：醫師在老人醫院要看得到成大的影像（H04 PACS 跨院調閱）與報告（#27）；若只排了程、看不到結果，功能只做了一半。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T08.html">T08</a> — 儀器排程、排程格、檢查項目主檔的 CDC 副本是讀路徑唯一來源；報告回流也可能走中台。</li>
+    <li><a href="./T02.html">T02</a> — 檢查項目碼、儀器代碼、排程格規則、準備事項的院區參數化。</li>
+    <li><a href="./T01.html">T01</a> — 全院排程、科室作業、門診／住院醫囑系統改寫為 C# 並將排程檢核與醫囑建立移到後端（配合 <a href="./T04.html">T04</a>），跨院命令才能在目標院區建立醫囑與排程。</li>
+    <li><a href="./T07.html">T07</a> — 訪談定義納入哪些檢查、預約是否需先有對方院區醫囑、費用與申報歸屬。</li>
+    <li><a href="./T09.html">T09</a> — 跨院病人索引／身分比對；部分檢查在成大需先有掛號（醫囑來源），會呼叫掛號命令。</li>
+    <li><a href="./H04.html">H04</a> — PACS 介接決定排定檢查如何進 worklist、影像如何跨院調閱；跨院 accession number 與病人 ID 對應需與 H04 共同設計（可並行，上線前整合）。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T14.html">T14</a> 轉檢與代檢 — 代檢流程的排程步驟直接使用本任務的命令；兩任務建議同組人、同一套命令模型。</li>
+    <li><a href="./T11.html">T11</a> 跨院手術排程 — 術前檢查可能觸發跨院檢查預約。</li>
+    <li><a href="./T16.html">T16</a> 老人醫院上線 — 開院後最高頻的跨院動作。</li>
+    <li><a href="./X01.html">X01</a> — 檢查報告系統 #27、LIS #19 的介接測試需以跨院排定檢查為案例。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>部分。本任務不直接連接檢查儀器：排程資料在 HIS 與中台之間流動，儀器是透過 PACS／RIS 的 DICOM Modality Worklist（MWL）得知要掃誰，而 PACS 介接屬 <a href="./H04.html">H04</a>。判為 partial 的理由：跨院排定的檢查若 worklist 上的病人 ID／accession number 對不回來源院區，影像會變成孤兒、報告回不去，這是本任務要負責的欄位設計，且整合測試必須含 PACS 測試環境與至少一台儀器（或 MWL 模擬器）。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>PACS／RIS（H04）</td><td>HL7 v2 ORM/ORU、DICOM MWL（推測，規格未載明）</td><td>PACS 原廠，經資訊室 HIS 組（貳-二-(二)）</td><td>PACS 測試環境、MWL 模擬器或測試儀器；跨院 accession／病人 ID 對應案例</td></tr>
+      <tr><td>檢查儀器（CT/MRI/超音波/內視鏡等）</td><td>經 PACS／RIS 的 DICOM MWL，本任務不直接介接</td><td>各儀器原廠（H04 範圍）</td><td>不需直接測試；確認 worklist 顯示跨院病人正確</td></tr>
+      <tr><td>檢查報告系統（#27）</td><td>規格未載明；推測 HL7 ORU 或 DB 介接</td><td>報告系統原廠／資訊室 HIS 組</td><td>X01 測試環境；報告回流來源院區案例</td></tr>
+      <tr><td>LIS（#19，若檢驗抽血納入）</td><td>規格未載明；常見 HL7 v2</td><td>LIS 原廠／資訊室 HIS 組</td><td>X01 測試環境；規格將檢驗抽血另列，需確認是否納入本任務</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>成大「全院排程」與各檢查科室作業的資料模型與流程說明（儀器主檔、排程格模板、預約→報到→完成狀態、誰能排、技術師如何調整）</td><td>資訊室 HIS 組（全院排程負責人）、影像醫學部／內視鏡中心排程窗口</td><td>不知道院內怎麼排檢查就無法設計跨院命令與空檔計算</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>納入範圍決議：哪些 modality／檢查科室、是否含檢驗抽血、預約是否需先有目標院區醫囑、住院病人是否納入</td><td>老人醫院籌備處、成大影像醫學部、T07 訪談</td><td>範圍決定工作量與與 T14 的分工</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>跨院檢查的醫囑歸屬、費用與健保申報規則（誰開單、誰申報、代檢標記）</td><td>成大健保申報單位、兩院醫務部、老人醫院籌備處</td><td>命令欄位與目標院區醫囑建立方式取決於此；與 T14 共用答案</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>檢查項目碼表、儀器代碼、準備事項／禁忌主檔（兩院是否共用同一套碼）</td><td>資訊室 HIS 組、影像醫學部、各檢查科</td><td>碼表不一致則無法自動檢核與帶出準備指示</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>H04 PACS／RIS 的 worklist 欄位規格與跨院病人 ID／accession number 對應方式；#27 報告系統回流介面</td><td>PACS 原廠、報告系統原廠，經資訊室 HIS 組</td><td>對不回來源院區則影像成孤兒、報告回不去</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老人醫院檢查設備規劃（有哪些儀器、開院時程、哪些檢查一律送成大）</td><td>老人醫院籌備處、影像醫學部</td><td>決定跨院流量預估與反向排程參數</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>同意書流程（電子同意書能否跨院、紙本如何流轉）與個資規範</td><td>兩院醫務部、病歷室、個資窗口</td><td>侵入性／顯影劑檢查沒有同意書無法執行</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>成大全院排程測試環境與 PACS 測試環境</td><td>資訊室 DC 組、HIS 組</td><td>聯測與驗收必需</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>醫囑歸屬與申報未定</strong> — 跨院檢查誰開單、誰申報、費用怎麼拆，是院方行政與健保問題；沒定案，命令模型無法收斂，且會與 T14 互相等待。</li>
+    <li><strong>排程真相在技術師手上</strong> — 若成大各科實際以人工調整排程格（加班、插件、依項目改時長），中台的「空檔」與現場不符；需設計科室確認迴圈或接受「暫排」狀態。</li>
+    <li><strong>病人 ID 與 accession 跨院對應</strong> — PACS 與報告系統以目標院區的 ID 為主，來源院區要能對回；若 T09 病人索引未定，這裡會直接卡住。</li>
+    <li><strong>準備事項未隨排程回流</strong> — 病人在老人醫院拿不到禁食／停藥指示，到成大被退檢；這是功能失敗的最常見形式。</li>
+    <li><strong>碼表不一致</strong> — 檢查項目、儀器、準備事項三院各自維護，自動檢核與帶出指示不可能。</li>
+    <li><strong>與 H04／#27 的整合順序</strong> — PACS 介接落後時只能以 MWL 模擬器驗證，上線風險移到 T16。</li>
+    <li><strong>與 T14 邊界模糊</strong> — 「預約檢查排程」與「轉檢／代檢」在規格是兩條，實務是一條流程；若分兩組人做會出現兩套命令模型。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>「檢查科室儀器排程」涵蓋哪些 modality／科室？是否含檢驗抽血（規格另列）、心臟功能、睡眠、肺功能等非影像檢查？規格未載明，需確認。</li>
+    <li>跨院預約是否需先在目標院區建立醫囑／受檢單？由命令自動建立還是需對方醫師覆核？</li>
+    <li>跨院檢查的健保申報與費用歸屬規則？「代檢」與「轉檢」在本任務如何標記？</li>
+    <li>準備事項與同意書：在哪院交付病人？電子同意書能否跨院？</li>
+    <li>影像（H04）與報告（#27）如何回流來源院區醫師？走中台還是直接推送？</li>
+    <li>住院病人跨院檢查是否納入？暫離院、運送、陪同規則為何？</li>
+    <li>成大各檢查科是否都用「全院排程」子系統？有無科室自有排程（例如內視鏡中心）需另接？</li>
+    <li>T12 與 T14 的分工：是否同一組人、同一套命令模型？</li>
+    <li>斗六分院是否納入？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

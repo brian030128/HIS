@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T02 院區差異參數化 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · core</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T02</div>
+  <h1>院區差異參數化</h1>
+  <p class="lede">把成大、斗六、老人醫院三院之間的行為差異，從散落在 3,900 支程式裡的 if-else 抽出來，變成「一套程式碼 + 每院一組設定」。這是專案目標「各院區程式邏輯以設定方式完成」（壹-四-2）的落實，也是「作為後續新建醫院快速建置基礎」的關鍵：第四家醫院應該是加一列設定，不是再改一次程式。T02 的<strong>設計</strong>必須在 T01 量產轉換前定案，否則轉換要做兩遍。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 · 300 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 30 人月（框架 6 + 差異盤點 8 + 逐程式套用 16）</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v">無（但需 P0 資料）</span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T01.html">T01</a> <a href="./T07.html">T07</a> <a href="./T15.html">T15</a> <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(一)-2、壹-四-2、壹-四-6</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(一)-2：「各院區差異性以參數化方式撰寫，讓程式簡潔、易於修改與維護：沿用與擴充 APP Config、WEB Config 等設定檔；載入院區全域變數，Context 類別（例如 user name、account、pwd、department、station、IP 等）；將 if … else … 段落改寫簡化，例如以字典取代或使用函式映射；將共用性高但各自撰寫的段落整理出來進行參數化設計；擴充資料庫表格相關設定，如 PCS_Ip_Config、PUB_Config 等；新增資料庫表格進行設定與維護。」</p>
+    <p>壹-四-2：「各院區程式邏輯以設定方式完成。」壹-四-6：「……使三院同步為一套 HIS。」貳-一-(一) 前言：「保留擴充彈性，可作為後續新建醫院快速建置與導入之基礎，易於集中開發與管理。」</p>
+  </blockquote>
+  <p>規格給了機制的清單（Config 檔、Context 類別、字典／函式映射、設定表），但<strong>沒有列出任何一項實際的院區差異</strong>——斗六與成大目前差在哪裡、老人醫院會差在哪裡，規格未載明，需確認。這代表 T02 有一半是考古工作。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>核心概念：程式只認識一個 <code>CampusContext</code>，所有院區相關的值與行為都從它拿；它由三層來源合成（DB 設定表 &gt; 設定檔 &gt; 程式預設），且院區「行為」差異走策略對映，「數值」差異走設定表。任何 Form 或 Service 內出現 <code>if (campus == "DL")</code> 就是缺陷，用 Roslyn analyzer 擋在 build 階段。</p>
+  <pre class="diagram">
+ 登入 (帳號 / 站台 / IP)
+      │
+      ▼
+┌──────────────────────────────┐   解析順序（高 → 低）
+│ CampusContextResolver        │   1. DB: PUB_Config / PCS_Ip_Config / 新表 CAMPUS_SETTING
+│  站台IP → 院區 → 設定合併     │   2. app.config / web.config <campus id="DL"> 區段
+└──────────────┬───────────────┘   3. 程式內 [DefaultValue] 預設
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│ CampusContext (immutable, per session)                        │
+│  CampusId, CampusName, NhiInstitutionCode(健保機構代號)         │
+│  User, Account, Dept, Station, ClientIp, Printers…            │
+│  Settings : ISettingStore   ← 數值差異（費用、代碼、路徑、IP） │
+│  Policies : IPolicyRegistry ← 行為差異（策略 / 函式映射）      │
+│  Features : IFeatureFlags   ← 功能開關（老醫沒有急診 → off）  │
+└──────────────┬───────────────────────────────────────────────┘
+               │ DI 注入
+   ┌───────────┼─────────────────┐
+   ▼           ▼                 ▼
+ Forms      WCF Services      Batch jobs
+ (讀 Context, 不判斷院區)  (同上; 由呼叫端帶 CampusId)
+
+ 策略對映範例：
+   IRegistrationFeePolicy  → { NCKU: Default, DL: Default, GER: GeriatricPolicy }
+   IBedAssignmentPolicy    → { *: Default }   ← 沒差異就不宣告
+   Func&lt;OrderType, Validator&gt; 字典取代 200 行 Select Case
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>CampusContext</strong>：登入時解析一次、session 期間不變的物件；WinForms 端放在 DI 容器的 scoped 實例，WCF 端從 message header（CampusId + 站台）重建，不信任 client 傳來的整包 context。規格列的 user name／account／pwd／department／station／IP 都在裡面；<strong>pwd 不應存在 Context 內</strong>（資安，見 T04／M03），改存 token，需跟院方溝通。</li>
+    <li><strong>設定優先序（DB &gt; 檔案 &gt; 預設）</strong>：DB 表可由院方資訊人員在不重新部署下改；設定檔管環境相依（連線字串、服務 URL、憑證）；預設值讓新院區「未設定即等同總院」，避免新院區要填幾百個值才能開機。每個設定 key 有 scope：<code>Global</code> / <code>Campus</code> / <code>Station</code>，同 key 取最細者，寫進 CAMPUS_SETTING 新表（規格說「新增資料庫表格進行設定與維護」）。</li>
+    <li><strong>行為差異 = 策略介面 + 註冊表</strong>：每一類差異定義一個小介面（如 <code>IRegistrationFeePolicy</code>、<code>IDischargeFlowPolicy</code>），預設實作是「總院行為」，只有真的不同的院區才註冊 override。註冊表是 <code>Dictionary&lt;(PolicyType, CampusId), Implementation&gt;</code>，找不到就退回 Default。這就是規格的「字典取代／函式映射」，同時避免每個策略都要為三院各寫一份。</li>
+    <li><strong>如何避免 <code>switch(campus)</code> 爆炸</strong>：(1) 規則——院區判斷只允許存在於 <code>HIS.Campus.*</code> 組件內，其他組件出現 CampusId 比較即 build error（自寫 Roslyn analyzer）；(2) 差異只能以「override 預設」表達，不能以列舉所有院區表達；(3) 用功能開關（FeatureFlags）處理「某院有／沒有這功能」，用設定值處理「數值不同」，用策略處理「流程不同」——三種各有明確去處，不混用；(4) 設定表有 UI 可維護與稽核紀錄（誰改了什麼），否則上線後會回到改程式。</li>
+    <li><strong>PCS_Ip_Config／PUB_Config 擴充</strong>：現行表格推測以 IP 或站台對應設定；擴充方式是加 <code>CampusId</code> 欄與 <code>Scope</code>，並提供 view 讓舊程式在過渡期繼續讀舊欄位。表結構<strong>規格未載明，需取得 DDL 與現有資料</strong>。</li>
+    <li><strong>三院差異怎麼被找出來</strong>（規格裡沒有，只能挖）：
+      <ol>
+        <li>對 VB 原始碼做靜態掃描：找機構代號、院區名稱、斗六 IP 網段、<code>Station Like "DL%"</code>、設定檔 key 等模式，產出「疑似院區分支」清單（預估數百處）。</li>
+        <li>比對成大與斗六兩院的 PCS_Ip_Config／PUB_Config／代碼表資料差異（如果兩院各自一個 DB，diff 就是差異清單的一半）。</li>
+        <li>與 HIS 組逐子系統訪談確認每處分支的業務理由，分類為「數值／開關／流程」。</li>
+        <li>老人醫院差異來自 T07 訪談；T02 只負責機制與老醫「已知會不同」的骨架（無急診？病房型態？長照給付？），內容留給 T07。</li>
+      </ol>
+    </li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>框架（Context、Resolver、設定表 + 維護 UI、策略註冊、analyzer、文件）約 6 人月；差異盤點（掃描工具 + 兩院資料 diff + 67 個子系統訪談）約 8 人月；逐支程式套用（把疑似分支改成策略／設定，估 400–800 處，每處 0.3–0.5 人日含測試）約 16 人月。合計約 30 人月。逐程式套用的部分與 T01 轉換同一支程式時一起做，實務上會被算在 T01 的每支人日內，這裡分開列是為了追蹤。若兩院其實是兩套分岔已久的程式碼（不是一套程式 + 設定），盤點工作量會加倍，且要先決定以哪一版為基準。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>院區在健保與行政上的身分</strong>：每院有自己的健保機構代號、申報身分、特約層級（醫學中心 vs 地區醫院 → 部分負擔、掛號費、病房費差額不同）。這些不是技術設定，是法規；老人醫院的特約層級與是否為總院的分院，會決定申報是分開還是合併，直接影響 Context 的設計（一個病人在兩院的病歷號是否相同？）。</li>
+    <li><strong>分院實際運作差異</strong>：斗六分院規模小，可能沒有某些科室、藥品品項、手術房數；流程上（如出院結帳、藥局窗口數）也不同。這些差異多半藏在程式裡而非文件裡。</li>
+    <li><strong>老人醫院型態</strong>：規格只說「依不同作業流程客製化」。老人醫院是否有急診？是否有長照／復健／安寧？門診量級？這些會決定哪些 FeatureFlag 要先設計。</li>
+    <li><strong>技術難點</strong>：Context 在 WinForms、WCF、批次三種宿主的生命週期不同（批次沒有登入者、可能一次跑多院）；WCF 端要把 CampusId 當成安全邊界（斗六站台不得存取成大資料，除非是 T09～T14 明定的跨院查詢）。</li>
+    <li><strong>設定值的正確性責任</strong>：一旦邏輯變設定，設定錯就是功能錯。要有設定的版本管理、比對工具（三院設定 diff）與變更稽核，這部分規格沒要求但沒有它會出事。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li>無正式前置任務。但需要 T01 的 P0 資料（原始碼、DB DDL、兩院設定表資料）才能開始盤點；設計本身可在拿到原始碼後 4–6 週內定案。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — Context 介面、設定優先序、策略註冊方式定案後，量產轉換才能把院區分支直接改成正確形式，不必二次返工。這是 T01 的 gate。</li>
+    <li><a href="./T07.html">T07</a> — 老人醫院差異訪談的產出要能落到 T02 的三種容器（設定／開關／策略）裡；T02 提供「差異登錄表」格式給訪談用。</li>
+    <li><a href="./T15.html">T15</a> — 老醫上線環境準備中的「基本資料轉置」與連線設定，就是填老醫那一欄的設定值。</li>
+    <li><a href="./T16.html">T16</a> — 三院同一版本上線的前提是三院差異全在設定內。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無直接硬體介接。但站台層級的設定（哪台電腦接哪台印表機、讀卡機 COM port、叫號機對應診間）是 Context 的 Station scope 要承載的內容，設計時要保留位置給 H01～H09 使用。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>（無直接介接）站台設備對應表</td><td>設定資料（PCS_Ip_Config 擴充）</td><td>資訊室 HIS 組提供現行表結構</td><td>兩院現行資料匯出</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>完整原始碼（同 T01 P0）＋ PCS_Ip_Config、PUB_Config 及所有設定／代碼表的 DDL 與<strong>成大、斗六兩院的實際資料</strong>；app.config／web.config 兩院版本</td><td>資訊室 HIS 組</td><td>院區差異不在規格裡、只在程式與資料裡。沒有這些，T02 只能設計空框架，T01 量產時仍不知道哪些 if-else 是院區分支。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>回答：斗六與成大目前是「同一套程式 + 設定切換」還是「兩份分岔的程式碼」？同一 DB 還是分開？病歷號是否共用？</td><td>資訊室 HIS 組</td><td>決定 T02 是「抽取」還是「合併」，工作量差一倍；也決定 Context 是否要處理跨院病人主索引。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>現行已知的院區差異清單（哪怕是口頭／Excel），與斗六分院資訊承辦聯絡人</td><td>資訊室 HIS 組、斗六分院資訊人員</td><td>訪談起點；沒有就純靠程式掃描，會漏掉靠人工流程繞過的差異。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>老人醫院基本身分資訊：健保機構代號／特約層級是否已定、是總院分院還是獨立院所、預計科別與有無急診、開院時程</td><td>老人醫院籌備處、醫事室／健保業務單位</td><td>決定申報身分模型與第一批 FeatureFlag；未定就以「與斗六同型」假設設計，之後可能重做。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方對設定維護的責任分工：上線後誰有權改 CAMPUS_SETTING？需不需要審核流程？</td><td>資訊室 HIS 組</td><td>決定要不要做維護 UI 與稽核（我們建議要），影響 2–3 人月。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>院方對 Context 內含「pwd」的意圖說明，以及帳號／權限來源（AD？認證授權子系統？）</td><td>資訊室 HIS 組、資安承辦</td><td>規格字面把密碼放進 Context，與 M03 資安要求衝突；需在設計審查時一起定案。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>差異未知且不在文件裡</strong> — 最大風險。盤點漏掉的分支會在斗六上線時以「功能不對」的形式出現。對策：掃描工具 + 兩院資料 diff + 斗六試營運期間的差異回報機制。</li>
+    <li><strong>兩院程式碼已分岔</strong> — 如果斗六跑的是一份改過的副本，「一套程式」得先合併再參數化，且要決定誰是基準（通常是總院），斗六的獨有修改要逐一評估。</li>
+    <li><strong>設計定案太晚拖住 T01</strong> — T02 設計是 T01 量產的 gate；若原始碼晚到或院方決策慢，整個轉換排程往後推。對策：設計以「可擴充的最小版本」在第 6 週前凍結，之後只加不改。</li>
+    <li><strong>過度設計</strong> — 把每個差異都做成策略介面，會產生上百個小介面沒人維護。原則：數值走設定、開關走 flag，只有流程真的分岔才做策略；每個策略要有真實的第二種實作才存在。</li>
+    <li><strong>設定錯誤取代程式錯誤</strong> — 沒有設定 diff 工具、沒有稽核，上線後改錯一個值就是全院事故。</li>
+    <li><strong>老醫差異來得太晚</strong> — T07 訪談在 Phase 2；若 Phase 1 的 Context 沒預留老醫需要的維度（例如病房型態、長照給付），Phase 2 要改框架。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>斗六與成大：同一程式碼？同一 DB？同一病歷號體系？目前用什麼判斷院區（IP 網段、站台代碼、登入帳號）？</li>
+    <li>PCS_Ip_Config、PUB_Config 的實際結構與用途？還有哪些「設定型」資料表（代碼表、參數表）散在各子系統？</li>
+    <li>院方是否接受設定優先序 DB &gt; 設定檔 &gt; 預設？是否有值必須只能在設定檔（例如連線字串）？</li>
+    <li>老人醫院是否有急診／手術／ICU？是總院分院（同機構代號體系）還是獨立特約院所？開院時程？</li>
+    <li>跨院資料存取的邊界：斗六站台能否查成大病人資料？現況如何？（影響 Context 的安全語意，也影響 T09～T14）</li>
+    <li>院方是否要求設定維護 UI 與變更稽核？誰是設定的 owner？</li>
+    <li>批次程式的院區語意：一支批次跑三院，還是每院各排一次？</li>
+    <li>Context 內的「pwd」是否可以改為 token／session id？認證來源是什麼？</li>
+    <li>驗收 T02 的判準：analyzer 零違規？差異登錄表 100% 對應到設定？誰簽核？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

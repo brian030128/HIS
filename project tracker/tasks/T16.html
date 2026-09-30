@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T16 老人醫院上線與老醫版本回饋成醫、斗六 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 3 · deploy</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T16</div>
+  <h1>老人醫院上線，再以含老醫功能之版本回饋成大醫院、斗六分院上線</h1>
+  <p class="lede">專案的終點：老人醫院開院當天用新 HIS 開門，之後把「含老醫功能的版本」推回成醫與斗六，讓三院跑同一套碼——這是最後 20% 付款與整案驗收的條件。難點不在技術而在時間與控制權：Phase 2 到第 540 天，Phase 3 到第 630 天，只有 90 天要做三次上線，而老醫的開院日期與硬體由院方決定。我們需要一個<strong>發布列車 + 分支模型</strong>，讓老醫版本回到另兩院時不帶回歸，也需要一個當開院延期時的<strong>解耦方案</strong>。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 3 · 630 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（開院日 H01–H09 設備全數實戰）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 28 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T15.html">T15</a> <a href="./T06.html">T06</a> <a href="./T05.html">T05</a> <a href="./T09.html">T09</a>–<a href="./T14.html">T14</a> <a href="./H01.html">H01</a>–<a href="./H09.html">H09</a> <a href="./X01.html">X01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./M04.html">M04</a>（保固起算）、整案驗收</span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(五)-2/3/4、壹-四-6、貳-三-4、三階段表</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(五)：「上線順序配合老人醫院硬體設備及開院時程，與院方討論後訂定。…2. 老人醫院上線。3. 將此版（含老人醫院功能）回饋於成大醫院上線。4. 將此版（含老人醫院功能）回饋於斗六分院上線。」</p>
+    <p>壹-四-6：「協助老人醫院系統上線，以及成大醫院、斗六分院系統的更換，使三院同步為一套 HIS。」</p>
+    <p>貳-三-4：「HIS 服務不能中斷，需求調整亦需持續上版，得標廠商必須提供規劃以確保新舊版本功能一致。」</p>
+    <p>三階段表：第三階段「老人醫院系統建置與上線；以老醫版本於斗六、成醫上線」，交付「教育訓練簽到表與教材、原始程式碼（電子檔）」，決標次日起 630 天內，付款 20%。</p>
+  </blockquote>
+  <p>規格未載明老醫開院日期，也沒說開院延期時 630 天的履約期限如何處理。「與院方討論後訂定」是我們唯一的槓桿：要在工作計畫書裡寫進「老醫開院晚於第 X 天時，成醫／斗六先行升級至含老醫功能之版本（老醫功能以院區參數停用）」的解耦條款。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>從第 300 天起就要以這個分支模型運作，不是到 Phase 3 才開始。核心原則：<strong>一份碼、一個 build、三套院區參數</strong>——老醫功能不是另一個分支，而是同一個 build 裡由 T02 參數啟用的功能。</p>
+  <pre class="diagram">
+分支模型（Day 300 起）
+
+  main ──●────●──────●──────●──────●──────●──────●──▶  成醫/斗六 正式版（v1.x）
+         │    ▲ hotfix│      ▲總院增修│      ▲       │      ▲
+         │    │       │      │(T05 B) │      │       │      │
+         │  release/1.1   release/1.2    release/1.3  ...   │ ← 每 4 週一班列車
+         │                                                   │
+         └─▶ develop ──●──●──●──●──●──●──●──●──●──●──●──●───┼─▶ v2.0 = 老醫版
+               ▲  ▲  ▲          ▲              ▲             │
+               feature/T09..T14 feature/H01..H09  merge main→develop 每 2 週（T05）
+                                                             │
+  Phase 3 時序（假設開院 = Day 555）                           ▼
+  Day 540  v2.0-rc 凍結（develop → release/2.0）；老醫 UAT 完成、X01 完成
+  Day 555  老醫上線（新院無舊系統，開院即上線；hypercare 3 週，修正入 release/2.0）
+  Day 580  v2.0.x 回饋成醫：C#→C# 升級，沿用 T06 launcher 波次；老醫功能依院區參數啟用
+  Day 600  v2.0.x 回饋斗六
+  Day 615  release/2.0 → main，tag；三院同一 build；VB 徹底封存
+  Day 630  驗收（原始碼、教育訓練簽到表與教材）
+
+  解耦方案：開院晚於 Day 560 → 先做 Day 580/600 的成醫、斗六升級（老醫功能休眠），
+           老醫開院時只做「開院」不做「升級」，履約期限爭議降到最小。
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>發布列車</strong>：main 每 4 週一班（release/1.x），只載總院增修（T05 時期 B）與 hotfix，服務成醫／斗六正式環境。develop 每 2 週從 main merge 一次，老醫功能與介接（T09–T14、H01–H09）以 feature 分支進 develop，經 SIT 才能合併。任何進 develop 的 DB 變更必須是 expand-only（新增表／欄位、新 stored procedure 版本），舊 build 仍能跑——這是 v2.0 回饋兩院時能回退到 v1.x 的前提。</li>
+    <li><strong>回歸防線</strong>：(1) T01／T05 的自動化測試在兩條分支上都跑；(2) 每次 main→develop merge 後跑成醫院區參數的完整回歸（不是只跑老醫）；(3) v2.0-rc 在成醫 UAT 環境以成醫參數跑一輪端到端（掛號→批價→藥局→住院），證明「老醫功能關閉時成醫行為不變」；(4) 跨院功能雙向測試：成醫查老醫床位、老醫查成醫排程都要在 rc 上做，因為 T09–T14 的另一端就是成醫。</li>
+    <li><strong>老醫上線</strong>：新醫院沒有舊系統，「cutover」其實是「開院日」——沒有回退對象，只有「降級運作」（例如中台故障時跨院查詢停用、單院作業繼續）。開院前一週做 dress rehearsal：真實動線走一遍（掛號→檢傷→診間叫號→開立→藥包機→繳費機→慢箋機），H01–H09 每台設備都要在 rehearsal 裡有成功紀錄。開院後 hypercare 3 週，現場 3 人。</li>
+    <li><strong>回饋成醫</strong>：C#→C# 升級，比 Phase-1 簡單得多——同一顆 DB、同一套 client launcher、無 VB 並存。仍沿用 T06 的波次（門診→急診→住院）但可壓縮到 2 週；回退 = launcher 指回 v1.x build，DB 因 expand-only 不需回滾。成醫升級後跨院功能才是雙向的（成醫使用者可查／訂老醫資源），這也是為什麼順序不能反過來太久。</li>
+    <li><strong>回饋斗六</strong>：與成醫共用 DB 與碼（若 T06 確認為真），成醫升級後斗六只是 client 切換與院區參數驗證，1 週。</li>
+    <li><strong>驗收交付</strong>：三院同一 tag 的原始碼（含建置腳本與三套院區參數）、教育訓練簽到表與教材（M02 + T15 使用者訓練）、以及 T05 變更登錄簿作為「新舊版本功能一致」的證據。保固（M04）從此起算。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>發布工程：分支模型、CI、雙分支自動化回歸、expand-only 檢查（4 人月）。老醫開院：rehearsal、開院日與 3 週 hypercare、設備現場（6 人月）。成醫回饋：rc 回歸、波次切換、2 週 hypercare（8 人月）。斗六回饋（3 人月）。驗收文件、原始碼整理、最終交付（3 人月）。開院延期的待命與解耦方案執行緩衝（4 人月）。合計 28 人月。這個數字假設老醫開院在第 540–560 天之間；若開院在 600 天後，本任務無法在 630 天內完成，人力估算失去意義，要改談履約期限。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>新醫院開院的作業現實</strong>：開院第一天通常只開部分門診，住院逐週開床；HIS 要支援「部分科別開放」的參數，且第一個月主檔異動頻繁（新增醫師、新增診間），T15 的差異補轉機制要能持續用。</li>
+    <li><strong>跨院功能的雙端一致性</strong>：T09–T14 每個功能在成醫端與老醫端行為要對稱，但兩院院區參數不同（例如老醫沒有急診就沒有急診床）；回歸測試要以「院區 × 功能」為矩陣。</li>
+    <li><strong>成醫升級的變更疲勞</strong>：成醫使用者在第 300 天剛換過一次系統，第 580 天再升級一次，接受度與訓練負擔要與護理部、醫務部溝通；這次升級對他們的可見變化應盡量小。</li>
+    <li><strong>健保申報與月結時序</strong>：三次上線都要避開每月 1–20 日申報期與月底批次，90 天裡實際可用的切換窗只有 3–4 個。</li>
+    <li><strong>版本管理與資安要求</strong>：伍-三-6 要求版本管理與存取紀錄，伍-三-8 要求正式環境清除測試帳號；每次上線都要重做一次檢核。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T15.html">T15</a> — 環境、基本資料、連線、權限、client 全部就緒是開院的硬前提。</li>
+    <li><a href="./T06.html">T06</a> — 成醫與斗六必須已在 C# v1.x 上，v2.0 才能「回饋」；並存 launcher 與波次機制直接重用。</li>
+    <li><a href="./T05.html">T05</a> — 時期 B 的 main→develop 合併確保 v2.0 含所有總院增修；沒做到，回饋等於功能倒退。</li>
+    <li><a href="./T09.html">T09</a>–<a href="./T14.html">T14</a> — 老醫特定功能是 v2.0 的內容；未完成的功能只能以參數關閉、列入驗收保留項。</li>
+    <li><a href="./H01.html">H01</a>–<a href="./H09.html">H09</a> — 開院日每台設備要能用；任一介接未完成，該作業流程要有人工替代方案。</li>
+    <li><a href="./X01.html">X01</a> — 26 個院內系統介接測試完成是老醫 UAT 結案條件。</li>
+    <li>間接：<a href="./T08.html">T08</a> 中台是跨院功能的資料來源；<a href="./M03.html">M03</a> 三次上線前各需資安檢核；<a href="./M02.html">M02</a> 技術移轉需在驗收前完成。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./M04.html">M04</a> — 保固一年自驗收起算；三院版本一致才有可維護性。</li>
+    <li>整案驗收與 20% 付款。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>本任務不開發介接，但老醫開院日是 H01–H09 所有設備的第一次實戰，且成醫升級時既有周邊要繼續運作。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>老醫 H01–H09 設備（檢傷、叫號機、藥包機、PACS、刀房叫號、智慧藥櫃、繳費機、慢箋機、健檢儀器）</td><td>各原廠協定（見各 H 任務）</td><td>各設備原廠</td><td>開院前 dress rehearsal 每台設備真機走一遍；原廠現場支援</td></tr>
+      <tr><td>健保 IC 卡（老醫院所代號）</td><td>CSHIS DLL、健保 VPN</td><td>健保署</td><td>老醫正式 VPN 開通、開院首日申報連通</td></tr>
+      <tr><td>成醫、斗六既有 client 周邊</td><td>同 T06</td><td>院方</td><td>v2.0 在成醫 UAT 以真機驗證</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>老醫開院日期（含分階段開放計畫）</strong>與硬體到位時程的書面版本</td><td>老人醫院籌備處、資訊室、專案管理人</td><td>Phase 3 只有 90 天做三次上線；沒有日期無法排程，開院晚於第 560 天則 630 天履約不可能。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>工作計畫書納入<strong>解耦條款</strong>：開院延期時成醫／斗六先行升級（老醫功能休眠）且履約期限相應調整</td><td>專案管理人、採購組</td><td>規格說順序「與院方討論後訂定」，這是唯一能保護我們免於院方延期導致逾期罰則的機制。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方同意<strong>分支模型與發布列車</strong>：main 每 4 週、develop 每 2 週合併、DB 變更 expand-only 規則</td><td>資訊室 HIS 組、DC 組（DBA）</td><td>時期 B 院方若在 main 上做非 expand-only 的 DDL，v2.0 回饋將無法回退。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>成醫、斗六<strong>第二次升級的切換窗與使用單位同意</strong></td><td>醫務部、護理部、各科主任</td><td>使用者 280 天內換兩次系統；沒有事先溝通會在最後階段遭遇抵制。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>開院 dress rehearsal 的<strong>各設備原廠現場支援承諾</strong>與時段</td><td>H01–H09 各原廠、老人醫院籌備處</td><td>開院日設備故障沒有原廠在場就是臨床事件；原廠合約由院方簽。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>驗收標準確認：<strong>「三院同一版本」的判定方式</strong>、未完成功能以參數關閉是否可列保留項</td><td>專案管理人、採購組</td><td>影響 20% 付款；規格只寫交付物不寫判定。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>成醫 UAT 環境在 Phase 3 仍可用（跑 v2.0-rc 成醫參數回歸）</td><td>資訊室 DC 組</td><td>Phase-1 測試環境若被回收，v2.0 回饋沒有地方做成醫回歸。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>開院日期在院方手上、履約期限在我們頭上</strong> — 這是全案最不對稱的風險。老醫硬體採購、建照、評鑑任何一項延誤都直接吃掉 90 天窗口。</li>
+    <li><strong>Phase 2 與 Phase 3 幾乎沒有緩衝</strong> — 540 天 Phase 2 驗收與 555 天開院之間只有兩週，Phase 2 若延遲，老醫只能帶著未驗收的功能開院。</li>
+    <li><strong>回饋帶入回歸</strong> — 沒有雙分支回歸與 expand-only 紀律，v2.0 在成醫會打壞已穩定的 v1.x 行為；成醫是三院中量最大的，回歸的代價最高。</li>
+    <li><strong>三次上線擠在 3–4 個切換窗</strong> — 健保申報期讓可用時段極少，任一次延誤會連鎖推到 630 天以後。</li>
+    <li><strong>設備介接的長尾</strong> — H01–H09 有原廠黑盒子，任一台在 rehearsal 才發現問題，開院日就要人工替代。</li>
+    <li><strong>院方在時期 B 的開發紀律</strong> — 若院方直接改正式環境或跳過 release 分支，分支模型形同虛設。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>老醫預定開院日期？是否分階段（先門診、再住院）？與本案 540／630 天的關係院方怎麼看？</li>
+    <li>開院延期時，院方是否接受「成醫／斗六先升級、老醫功能休眠」的順序調整？履約期限是否可依開院日順延？</li>
+    <li>時期 B（300–630 天）總院增修由誰在 main 上實作？誰有 merge 權？誰做 code review？</li>
+    <li>成醫的 v2.0 升級是否可壓縮為單一週末大切換（因為是 C#→C#）？院方風險偏好？</li>
+    <li>斗六是否確定與成醫共用 DB 與碼？若否，斗六回饋工作量要重估。</li>
+    <li>老醫功能未全數完成時，以院區參數關閉並列驗收保留項，院方是否接受？影響 20% 付款比例？</li>
+    <li>驗收時「原始程式碼（電子檔）」的形式：版本庫完整歷史還是 tag 快照？含 CI 與部署腳本？</li>
+    <li>保固起算日以整案驗收日為準，還是各院上線日分別起算？</li>
+    <li>三次上線的現場人力與院方 hypercare 叫修 SLA 是否比照保固條款？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

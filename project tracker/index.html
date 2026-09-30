@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HIS 多院區規劃 Tracker</title>
+<meta name="description" content="成大醫院「醫療資訊系統多院區規劃」案的任務總覽：依賴關係、硬體介接、領域難度、需向院方索取的資料與主要阻礙。">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/tasks.js"></script>
+</head>
+<body>
+<nav class="topnav">
+  <strong>HIS 多院區規劃 Tracker</strong>
+  <a href="#tasks">任務清單</a>
+  <a href="#graph">依賴圖</a>
+  <a href="#hardware">硬體介接</a>
+  <a href="#asks">要向院方要什麼</a>
+  <a href="#blockers">主要阻礙</a>
+  <a href="#contacts">緊急聯絡對象</a>
+</nav>
+<main class="page wide">
+
+<header class="task-header">
+  <h1>醫療資訊系統多院區規劃 — 專案追蹤總覽</h1>
+  <p class="lede">依據 02-規格表(含需求說明書) V9 拆解的全部任務。每個任務／系統有獨立頁面：預期系統樣貌、領域知識、依賴、硬體介接、需緊急向院方取得的資料、阻礙與待確認問題。</p>
+  <div class="kpis" id="kpis"></div>
+</header>
+
+<section id="timeline">
+  <h2>時程與付款里程碑</h2>
+  <table>
+    <thead><tr><th>階段</th><th>範圍</th><th>期限（決標次日起）</th><th>付款</th><th>交付物</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge ph1">Phase 1</span></td><td>多院區整合功能開發，於斗六分院、成大醫院上線</td><td>300 天</td><td>50%</td><td>程式設計書、測試報告書、原始程式碼</td></tr>
+      <tr><td><span class="badge ph2">Phase 2</span></td><td>老人醫院 HIS 功能開發、外部介接開發</td><td>540 天</td><td>30%</td><td>系統分析與設計書、程式設計書、測試報告書</td></tr>
+      <tr><td><span class="badge ph3">Phase 3</span></td><td>老人醫院建置上線，再以老醫版本回饋斗六、成醫</td><td>630 天</td><td>20%</td><td>教育訓練簽到表與教材、原始程式碼</td></tr>
+      <tr><td><span class="badge ph0">全程</span></td><td>專案管理、教育訓練、資安合規、保固、投標資格</td><td>—</td><td>—</td><td>工作計畫書（20 天內）、四份工作書、季維護報告</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn">驗收後有瑕疵：30 日曆天內改善；改正次數逾 1 次仍未改正，院方得自行改正並求償，或終止／解除契約。保固期間罰則上限為合約總價 20%，達上限得解約。</div>
+</section>
+
+<section id="tasks">
+  <h2>任務清單</h2>
+  <div class="filters">
+    <input id="q" type="search" placeholder="搜尋任務、摘要、聯絡對象…">
+    <select id="f-phase">
+      <option value="">全部階段</option>
+      <option value="1">Phase 1</option>
+      <option value="2">Phase 2</option>
+      <option value="3">Phase 3</option>
+      <option value="0">全程</option>
+    </select>
+    <select id="f-hw">
+      <option value="">硬體介接：全部</option>
+      <option value="yes">需要</option>
+      <option value="partial">部分</option>
+      <option value="no">不需要</option>
+    </select>
+    <select id="f-cat">
+      <option value="">全部類別</option>
+    </select>
+    <select id="sort">
+      <option value="id">排序：ID</option>
+      <option value="domain">領域難度 ↓</option>
+      <option value="tech">技術難度 ↓</option>
+      <option value="effort">工作量 ↓</option>
+      <option value="deps">被依賴數 ↓</option>
+    </select>
+  </div>
+  <table class="tasks">
+    <thead><tr>
+      <th>ID</th><th>任務／系統</th><th>階段</th><th>類別</th><th>硬體</th><th>領域難度</th><th>技術難度</th><th>人月</th><th>依賴</th><th>被依賴</th>
+    </tr></thead>
+    <tbody id="task-rows"></tbody>
+  </table>
+  <p class="lede" id="task-count"></p>
+</section>
+
+<section id="graph">
+  <h2>任務依賴圖</h2>
+  <p>由左至右為依賴順序（左邊先做）。滑鼠移到節點上會標示它的前置與後續任務；點擊進入該任務頁。</p>
+  <div class="legend">
+    <span><i style="border-color:var(--p1)"></i>Phase 1</span>
+    <span><i style="border-color:var(--p2)"></i>Phase 2</span>
+    <span><i style="border-color:var(--p3)"></i>Phase 3</span>
+    <span><i style="border-color:var(--p0)"></i>全程</span>
+  </div>
+  <div class="graph-wrap"><svg class="graph" id="depgraph"></svg></div>
+  <h3>關鍵路徑（依賴鏈最長者）</h3>
+  <p id="critical-path"></p>
+</section>
+
+<section id="hardware">
+  <h2>需要介接硬體／外部設備的任務</h2>
+  <p>「需要」= 直接對實體設備、Kiosk、儀器或其黑盒控制軟體介接；「部分」= 軟體系統，但與設備相鄰或需廠商黑盒配合。細節（協定、SDK、測試需要什麼）見各任務頁的「硬體／外部設備介接」段落。</p>
+  <div class="two-col">
+    <div><h3>需要</h3><ul id="hw-yes"></ul></div>
+    <div><h3>部分</h3><ul id="hw-partial"></ul></div>
+  </div>
+  <div class="callout">共同點：規格只列系統名稱，沒有廠牌、型號、協定或介接文件；老人醫院要買哪一家的設備、何時到貨，規格未載明。成大醫院現在已有同類設備的 VB.Net 介接程式，是最快的起點，應列為 P0 索取項目。</div>
+</section>
+
+<section id="asks">
+  <h2>我們應該向院方要什麼</h2>
+  <p>底線清單（沒有這些就無法估算、無法開工），按優先順序。各任務頁「需要緊急向院方／原廠取得」段落有細項；下方第二部分是由全部任務頁彙整的 P0 清單。</p>
+  <ol>
+    <li><strong>全部舊原始碼</strong>：所有 VB.Net 專案（門診、急診、住院、醫療共用四大類）、262 支批次程式、尚未盤點的本機端獨立程式、WCF 服務、共用元件；含版本庫歷史、build script、設定檔（APP/WEB Config）、部署腳本。沒有原始碼，T01 的工作量（全案六成以上）無法估算。</li>
+    <li><strong>資料庫</strong>：DB 引擎與版本、完整 schema／DDL、stored procedures、資料字典、PCS_Ip_Config／PUB_Config 等設定表內容、資料量與成長率，以及一份去識別化的測試資料庫副本。</li>
+    <li><strong>程式盤點清單</strong>：3,647 支線上作業與 262 支批次的清單，含所屬子系統、負責人、使用頻率、最後修改日。用來排 T01 的模組順序與判斷可淘汰者。</li>
+    <li><strong>現有介接程式與規格</strong>：成大醫院現在對 9 類設備（檢傷、叫號機、藥包機、PACS、刀房叫號、智慧藥櫃、繳費機、慢箋領藥機、健檢儀器）與 26 個內部系統的介接程式原始碼、介面文件、廠商聯絡人。</li>
+    <li><strong>老人醫院的規劃資料</strong>：開院日期、科別與病床數、服務範圍、設備採購清單（廠牌／到貨日）、籌備處組織與窗口。這決定 Phase 2 的範圍與 Phase 3 的日期。</li>
+    <li><strong>總院變更流程的入口</strong>：總院 HIS 持續改版；我們需要其版本庫或每次上版的差異、release notes、以及一位指定對口，否則 T05 無法運作。</li>
+    <li><strong>環境與存取</strong>：測試環境（含 26 系統的測試副本）、VPN／遠端連線程序、AD 帳號、可否使用雲端 CI 與 AI 輔助工具處理院方程式碼。</li>
+    <li><strong>資安基準</strong>：院方指定的資通系統防護需求等級（附表九：普／中／高）、評估報告與檢核表格式、弱掃／滲透測試時程。</li>
+    <li><strong>既有文件</strong>：系統文件、操作手冊、歷次上線與教育訓練教材、已知問題清單。</li>
+    <li><strong>各系統／廠商指定聯絡人</strong>：26 個內部系統與 9 類設備各一位可回覆技術問題的人。</li>
+  </ol>
+  <h3>由各任務頁彙整的緊急索取清單</h3>
+  <div class="filters">
+    <select id="ask-pri">
+      <option value="P0">只看 P0</option>
+      <option value="P1">P0 + P1</option>
+      <option value="">全部</option>
+    </select>
+    <select id="ask-group">
+      <option value="from">依對象分組</option>
+      <option value="task">依任務分組</option>
+    </select>
+  </div>
+  <div id="ask-list"></div>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙</h2>
+  <ol>
+    <li><strong>沒有原始碼就沒有估算</strong>：規格只給程式支數；改寫難度取決於程式品質、共用程度、SQL 內嵌深度。得標後 20 天內要交工作計畫書，但原始碼可能還沒到手。</li>
+    <li><strong>老人醫院範圍在得標後才確定</strong>：規格明載差異需求要在需求訪談後才定基準，但 540 天與 30% 付款已固定。範圍膨脹風險全在廠商。</li>
+    <li><strong>26 個黑盒系統的介接測試</strong>：規格要求「測試」但沒有要求各系統廠商配合，也沒有測試環境承諾。任一廠商不配合就卡住 X01 與 Phase 2 驗收。</li>
+    <li><strong>9 類設備尚未採購</strong>：老人醫院的檢傷、叫號機、藥包機、藥櫃、繳費機等廠牌未定；SDK、協定、測試機都要等採購完成。</li>
+    <li><strong>移動的目標</strong>：總院 VB.Net HIS 在 630 天內持續改版，每次改版都要在 C# 版重做一次；規格未定義同步機制。</li>
+    <li><strong>HIS 不能中斷</strong>：300 天內要在兩個院區換掉核心系統，需要平行運行或分模組切換的策略與回復計畫；規格只要求「緊急復原工作書」。</li>
+    <li><strong>投標資格門檻</strong>：CMMI L3、ISO/CNS 27001、BS 10012 或 ISO 27701 缺一不可，且不得有大陸廠牌產品或陸籍人員參與（含程式庫、套件與設備）。</li>
+    <li><strong>資安與遠端作業限制</strong>：遠端連線需逐項授權、掃毒、留紀錄；院方指定防護等級未知；1 小時內通報、5 年紀錄保存。影響開發工具鏈與工作方式。</li>
+    <li><strong>保固曝險</strong>：緊急維修 2 小時修復、24×7 專線，罰則每 4 小時 2‰、上限 20%。需要輪班人力與遠端存取前提。</li>
+    <li><strong>驗收只容一次改正</strong>：瑕疵 30 天內改善，逾 1 次未改正院方得終止契約並沒收保證金。</li>
+  </ol>
+  <h3>各任務頁交叉浮現的關鍵未知（規格未載明，應在第一次會議就問）</h3>
+  <ol>
+    <li><strong>老人醫院是成大的分院還是獨立醫事機構？</strong> 決定健保申報歸屬、代檢費用、慢箋領藥、機構代號與 VPN 申請，直接改變 <a href="tasks/T09.html">T09</a>、<a href="tasks/T14.html">T14</a>、<a href="tasks/H08.html">H08</a> 的設計（見 <a href="tasks/T07.html">T07</a>）。</li>
+    <li><strong>三院是否共用病歷號（或需要 EMPI）？</strong> 所有跨院功能（<a href="tasks/T09.html">T09</a>–<a href="tasks/T14.html">T14</a>）、PACS accession、藥櫃身分同步都建立在這個答案上。</li>
+    <li><strong>資料庫拓撲</strong>：斗六與成醫是同一套程式碼與 DB 還是已分叉？老醫是獨立 DB？DB 引擎與版本？CDC／Replication 是否已啟用？這是 <a href="tasks/T08.html">T08</a> 報價與 <a href="tasks/T02.html">T02</a> 設計的最大不確定性。</li>
+    <li><strong>可否院外開發？</strong> 資安條款「於機關指定處所使用」若解讀為只能駐點開發、不得使用雲端 CI 與 AI 輔助工具，整個交付模式都要改（見 <a href="tasks/M03.html">M03</a>）。</li>
+    <li><strong>院方是否接受 VB.Net 與 C# 後端並存、按工作站分波切換？</strong> 這是 300 天內在兩院上線且 HIS 不中斷的唯一可行策略，需要書面同意（見 <a href="tasks/T06.html">T06</a>）。</li>
+    <li><strong>老醫開院日與設備到貨日</strong>：由院方控制，但 630 天期限由我們承擔；工作計畫書需納入「開院延後則先升級成醫／斗六」的脫鉤條款（見 <a href="tasks/T16.html">T16</a>）與「真機聯測需設備到位」的院方配合事項（H01–H09）。</li>
+    <li><strong>26 個系統廠商的配合義務</strong>：規格只說院方「會請」廠商提供介接說明，沒有陪測義務；且其中約半數（LIS、MIS、WEB EMR…）在 Phase 1 成醫上線時就必須通，不是 Phase 2（見 <a href="tasks/X01.html">X01</a>）。</li>
+    <li><strong>未計價的 11 個月支援期</strong>：第 300 天成醫／斗六上線後到第 630 天驗收之間，規格沒有定義維運責任與 SLA，但實務上就是我們在撐（見 <a href="tasks/M01.html">M01</a>、<a href="tasks/M04.html">M04</a>）。</li>
+    <li><strong>基準線</strong>：現行系統沒有效能數據、沒有弱掃基準；沒有基準，所有改寫後的問題都會被算成「新增」而免費修（見 <a href="tasks/T03.html">T03</a>、<a href="tasks/M03.html">M03</a>）。</li>
+  </ol>
+  <div class="callout ok">工作量合計約 <span id="effort-total"></span> 人月，其中 <a href="tasks/T01.html">T01</a> 改寫本身約 300 人月（區間 180–600），要在第 300 天前完成需要 35–45 名工程師的 7–8 個月視窗。這個數字在拿到原始碼前只是量級估計。</div>
+</section>
+
+<section id="contacts">
+  <h2>緊急聯絡對象（由各任務頁彙整）</h2>
+  <div id="contact-list"></div>
+</section>
+
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9 · 資料來源：data/*.json（由 build.py 彙整為 assets/tasks.js）</footer>
+
+<script>
+(function () {
+  const T = (window.TASKS || []).slice().sort((a, b) => a.id.localeCompare(b.id));
+  const byId = Object.fromEntries(T.map(t => [t.id, t]));
+  const dependents = {};
+  T.forEach(t => (t.depends_on || []).forEach(d => { (dependents[d] = dependents[d] || []).push(t.id); }));
+  const phaseLabel = p => ({1: 'Phase 1', 2: 'Phase 2', 3: 'Phase 3', 0: '全程'})[p] || '?';
+  const hwLabel = h => ({yes: '需要', partial: '部分', no: '不需要'})[h] || '?';
+  const catLabel = c => ({core: '核心改寫', shared: '跨院共享', platform: '資料平台', hardware: '設備介接', 'interface-test': '介接測試', deploy: '建置上線', management: '專案管理', compliance: '資安合規', bid: '投標資格', requirements: '需求'})[c] || c;
+  const link = id => `<a href="tasks/${id}.html">${id}</a>`;
+  const dots = n => `<span class="dots d${n}"></span>${n}/5`;
+
+  // KPIs
+  const kp = document.getElementById('kpis');
+  const sumEffort = T.reduce((s, t) => s + (t.effort_pm || 0), 0);
+  const hwYes = T.filter(t => t.hardware === 'yes').length;
+  const p0 = T.reduce((s, t) => s + (t.urgent_asks || []).filter(a => a.priority === 'P0').length, 0);
+  kp.innerHTML = [
+    [T.length, '任務／系統'],
+    [hwYes, '需介接硬體'],
+    [sumEffort, '預估人月（合計）'],
+    [p0, 'P0 緊急索取項'],
+    [630, '天完成'],
+  ].map(([n, l]) => `<div class="kpi"><span class="n">${n}</span><span class="l">${l}</span></div>`).join('');
+
+  // filters
+  const cats = [...new Set(T.map(t => t.category))];
+  const fcat = document.getElementById('f-cat');
+  cats.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = catLabel(c); fcat.appendChild(o); });
+
+  function renderRows() {
+    const q = document.getElementById('q').value.trim().toLowerCase();
+    const ph = document.getElementById('f-phase').value;
+    const hw = document.getElementById('f-hw').value;
+    const cat = fcat.value;
+    const sort = document.getElementById('sort').value;
+    let rows = T.filter(t =>
+      (ph === '' || String(t.phase) === ph) &&
+      (hw === '' || t.hardware === hw) &&
+      (cat === '' || t.category === cat) &&
+      (q === '' || (t.id + ' ' + t.title + ' ' + (t.summary || '') + ' ' + (t.contacts || []).join(' ')).toLowerCase().includes(q))
+    );
+    const key = { domain: t => -t.domain_difficulty, tech: t => -t.tech_difficulty, effort: t => -(t.effort_pm || 0), deps: t => -(dependents[t.id] || []).length }[sort];
+    if (key) rows = rows.slice().sort((a, b) => key(a) - key(b) || a.id.localeCompare(b.id));
+    document.getElementById('task-rows').innerHTML = rows.map(t => `
+      <tr>
+        <td class="id">${link(t.id)}</td>
+        <td><a href="tasks/${t.id}.html"><strong>${t.title}</strong></a><br><span class="lede" style="font-size:.85em">${t.summary || ''}</span></td>
+        <td><span class="badge ph${t.phase}">${phaseLabel(t.phase)}</span></td>
+        <td><span class="badge">${catLabel(t.category)}</span></td>
+        <td><span class="hw-${t.hardware}">${hwLabel(t.hardware)}</span></td>
+        <td>${dots(t.domain_difficulty)}</td>
+        <td>${dots(t.tech_difficulty)}</td>
+        <td>${t.effort_pm ?? ''}</td>
+        <td class="deps">${(t.depends_on || []).map(link).join('') || '—'}</td>
+        <td class="deps">${(dependents[t.id] || []).map(link).join('') || '—'}</td>
+      </tr>`).join('');
+    document.getElementById('task-count').textContent = `顯示 ${rows.length} / ${T.length} 個任務`;
+  }
+  ['q', 'f-phase', 'f-hw', 'f-cat', 'sort'].forEach(id => document.getElementById(id).addEventListener('input', renderRows));
+  renderRows();
+
+  // hardware lists
+  ['yes', 'partial'].forEach(h => {
+    document.getElementById('hw-' + h).innerHTML = T.filter(t => t.hardware === h)
+      .map(t => `<li>${link(t.id)} <strong>${t.title}</strong> — ${t.summary || ''}</li>`).join('') || '<li>—</li>';
+  });
+
+  // dependency graph: layered by longest path from roots
+  const depth = {};
+  function getDepth(id, stack = new Set()) {
+    if (depth[id] !== undefined) return depth[id];
+    if (stack.has(id)) return 0;
+    stack.add(id);
+    const deps = (byId[id] && byId[id].depends_on || []).filter(d => byId[d]);
+    depth[id] = deps.length ? 1 + Math.max(...deps.map(d => getDepth(d, stack))) : 0;
+    stack.delete(id);
+    return depth[id];
+  }
+  T.forEach(t => getDepth(t.id));
+  const cols = {};
+  T.forEach(t => (cols[depth[t.id]] = cols[depth[t.id]] || []).push(t));
+  const nCols = Object.keys(cols).length;
+  const W = 150, H = 40, GX = 70, GY = 14, PAD = 16;
+  const maxRows = Math.max(...Object.values(cols).map(c => c.length));
+  const svg = document.getElementById('depgraph');
+  const width = PAD * 2 + nCols * W + (nCols - 1) * GX;
+  const height = PAD * 2 + maxRows * H + (maxRows - 1) * GY;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.style.minWidth = Math.min(width, 1600) + 'px';
+  svg.setAttribute('height', height);
+  const pos = {};
+  Object.keys(cols).sort((a, b) => a - b).forEach(c => {
+    const list = cols[c].sort((a, b) => a.phase - b.phase || a.id.localeCompare(b.id));
+    const colH = list.length * H + (list.length - 1) * GY;
+    const y0 = PAD + (height - PAD * 2 - colH) / 2;
+    list.forEach((t, i) => { pos[t.id] = { x: PAD + c * (W + GX), y: y0 + i * (H + GY) }; });
+  });
+  let edges = '', nodes = '';
+  T.forEach(t => (t.depends_on || []).forEach(d => {
+    if (!pos[d]) return;
+    const a = pos[d], b = pos[t.id];
+    const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
+    const c = (x2 - x1) / 2;
+    edges += `<path class="edge" data-from="${d}" data-to="${t.id}" d="M${x1},${y1} C${x1 + c},${y1} ${x2 - c},${y2} ${x2},${y2}"/>`;
+  }));
+  T.forEach(t => {
+    const p = pos[t.id];
+    const title = t.title.length > 13 ? t.title.slice(0, 12) + '…' : t.title;
+    nodes += `<a href="tasks/${t.id}.html"><g class="node ph${t.phase}" data-id="${t.id}" transform="translate(${p.x},${p.y})">
+      <rect width="${W}" height="${H}"/>
+      <text class="id" x="8" y="16">${t.id}</text>
+      <text x="8" y="31">${title}</text>
+      <title>${t.id} ${t.title}\n依賴：${(t.depends_on || []).join(', ') || '無'}\n被依賴：${(dependents[t.id] || []).join(', ') || '無'}</title>
+    </g></a>`;
+  });
+  svg.innerHTML = `<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--muted)"/></marker></defs>${edges}${nodes}`;
+  svg.querySelectorAll('.edge').forEach(e => e.setAttribute('marker-end', 'url(#arr)'));
+  const allNodes = svg.querySelectorAll('.node'), allEdges = svg.querySelectorAll('.edge');
+  function ancestors(id, acc = new Set()) { (byId[id].depends_on || []).forEach(d => { if (byId[d] && !acc.has(d)) { acc.add(d); ancestors(d, acc); } }); return acc; }
+  function descendants(id, acc = new Set()) { (dependents[id] || []).forEach(d => { if (!acc.has(d)) { acc.add(d); descendants(d, acc); } }); return acc; }
+  allNodes.forEach(n => {
+    n.addEventListener('mouseenter', () => {
+      const id = n.dataset.id, keep = new Set([id, ...ancestors(id), ...descendants(id)]);
+      allNodes.forEach(m => m.classList.toggle('dim', !keep.has(m.dataset.id)));
+      allEdges.forEach(e => e.classList.toggle('hl', keep.has(e.dataset.from) && keep.has(e.dataset.to)));
+    });
+    n.addEventListener('mouseleave', () => { allNodes.forEach(m => m.classList.remove('dim')); allEdges.forEach(e => e.classList.remove('hl')); });
+  });
+  // critical path (longest chain by depth)
+  const deepest = T.slice().sort((a, b) => depth[b.id] - depth[a.id])[0];
+  if (deepest) {
+    const chain = [deepest.id]; let cur = deepest;
+    while (cur && (cur.depends_on || []).length) {
+      const next = (cur.depends_on || []).filter(d => byId[d]).sort((a, b) => depth[b] - depth[a])[0];
+      if (!next) break; chain.unshift(next); cur = byId[next];
+    }
+    document.getElementById('critical-path').innerHTML = chain.map(link).join(' → ') + `（${chain.length} 層）`;
+  }
+
+  // asks
+  function renderAsks() {
+    const pri = document.getElementById('ask-pri').value;
+    const grp = document.getElementById('ask-group').value;
+    const allow = pri === 'P0' ? ['P0'] : pri === 'P1' ? ['P0', 'P1'] : ['P0', 'P1', 'P2'];
+    const items = [];
+    T.forEach(t => (t.urgent_asks || []).forEach(a => { if (allow.includes(a.priority)) items.push({ ...a, task: t.id, title: t.title }); }));
+    const groups = {};
+    items.forEach(a => { const k = grp === 'from' ? (a.from || '未指定') : `${a.task} ${a.title}`; (groups[k] = groups[k] || []).push(a); });
+    const order = { P0: 0, P1: 1, P2: 2 };
+    document.getElementById('ask-list').innerHTML = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b)).map(k => `
+      <div class="ask-group"><h3>${k} <span class="badge">${groups[k].length}</span></h3>
+      <table class="asks"><thead><tr><th>優先</th><th>要什麼</th><th>${grp === 'from' ? '任務' : '向誰要'}</th><th>為什麼／沒有會怎樣</th></tr></thead><tbody>
+      ${groups[k].sort((a, b) => order[a.priority] - order[b.priority]).map(a => `<tr><td><span class="pri ${a.priority.toLowerCase()}">${a.priority}</span></td><td>${a.what}</td><td>${grp === 'from' ? link(a.task) : (a.from || '')}</td><td>${a.why || ''}</td></tr>`).join('')}
+      </tbody></table></div>`).join('') || '<p>無資料</p>';
+  }
+  ['ask-pri', 'ask-group'].forEach(id => document.getElementById(id).addEventListener('input', renderAsks));
+  renderAsks();
+
+  const et = document.getElementById('effort-total'); if (et) et.textContent = sumEffort;
+  // contacts
+  const contacts = {};
+  T.forEach(t => (t.contacts || []).forEach(c => (contacts[c] = contacts[c] || []).push(t.id)));
+  document.getElementById('contact-list').innerHTML = `<table><thead><tr><th>對象</th><th>相關任務</th></tr></thead><tbody>` +
+    Object.keys(contacts).sort((a, b) => contacts[b].length - contacts[a].length).map(c => `<tr><td>${c}</td><td class="deps">${contacts[c].map(link).join('')}</td></tr>`).join('') + '</tbody></table>';
+})();
+</script>
+</body>
+</html>

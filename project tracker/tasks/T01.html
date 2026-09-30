@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T01 VB.Net→C# 全面改寫 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · core</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T01</div>
+  <h1>VB.Net→C# 全面改寫</h1>
+  <p class="lede">把成大醫院／斗六分院現行 VB.Net HIS（門診、急診、住院、醫療共用四大系統；線上約 3,647 支、批次約 262 支、另有未盤點的本機獨立程式）全部改寫為 C#，且功能與現行版本一致。這是全案最大的單一工作項目，Phase 1 付款 50% 的主體，也是 T02～T06 與整個老人醫院導入的地基：沒有它，其他任務都只是紙上設計。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 · 300 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（IC 卡讀卡機、印表機、條碼）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d5"></span> 5/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 300 人月（區間 180–600）</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T02.html">T02</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T03.html">T03</a> <a href="./T04.html">T04</a> <a href="./T05.html">T05</a> <a href="./T06.html">T06</a> <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(一)-1、貳-二-(一)、壹-四-1、附錄</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(一)-1：「程式原始碼由 VB.Net 改寫為 C#，包含門診、住院、急診系統的前後端程式及批次程式。HIS 共四大系統分類，線上作業約 3,647 支、批次作業約 262 支，另有隨業務需要不定期在本機端執行的獨立程式（之後盤點）。」子系統數：醫療共用 8、門診 27、急診 7、住院 25（附錄）。</p>
+    <p>貳-二-(一)：「開發工具：Microsoft Visual Studio 2022；程式語言：C#。」</p>
+    <p>壹-四-1：「以現行在成大醫院及斗六分院運行的 HIS 為基礎，進行系統整合面的分析與開發……以達到一致性、擴充性及易於維護的目標。」</p>
+    <p>貳-三-4：「HIS 服務不能中斷，需求調整亦需持續上版，得標廠商必須提供規劃以確保新舊版本功能一致。」</p>
+    <p>階段一交付：程式設計書、測試報告書、原始程式碼（電子檔）。</p>
+  </blockquote>
+  <p>規格<strong>只</strong>規定語言（C#）與 IDE（VS 2022）。UI 技術（WinForms／WPF／Web）、.NET 版本（Framework 4.8 或 .NET 8）、資料庫（推測為 SQL Server，因 PCS_Ip_Config／PUB_Config 為資料表命名，但規格未載明）、主機平台（IIS／Windows Service）都<strong>規格未載明，需確認</strong>。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>現行系統啟用於民國 100 年（壹-二），以 VB.Net + WCF 為世代特徵，最合理的推測是：WinForms 胖客戶端 → WCF 服務（IIS）→ SQL Server，批次以 Windows 排程執行 exe。我們的目標架構刻意<strong>不改變拓樸</strong>，只換語言與整理分層——因為規格寫的是「改寫」不是「重新設計」，且 300 天內要在兩院上線，任何 UI 典範轉移（改 Web、改 WPF）都會把使用者重新訓練與流程風險加進來，付不起。</p>
+  <pre class="diagram">
+                 現行 (VB.Net)                                目標 (C#)
+┌────────────────────────────┐            ┌──────────────────────────────────────┐
+│ WinForms Client (VB)       │            │ WinForms Client (C#)                 │
+│  ~3,647 支線上作業          │            │  Forms / UserControls（自動轉換+修整）│
+│  內嵌 SQL、院區 if-else     │  ──────▶   │  無 SQL；院區差異走 CampusContext(T02)│
+│  IC 卡 / 印表 / 條碼 DLL    │            │  IC 卡 / 印表 / 條碼 Wrapper (共用層) │
+└─────────────┬──────────────┘            └─────────────┬────────────────────────┘
+              │ WCF (HTTP)                               │ WCF HTTP + HTTPS (T04)
+┌─────────────▼──────────────┐            ┌─────────────▼────────────────────────┐
+│ WCF Services (VB)          │            │ HIS.Services (C#, WCF on IIS)        │
+│  可能含泛用 ExecSql 介面    │  ──────▶   │  依子系統分 ServiceContract           │
+│                            │            │  HIS.Rules 檢核引擎 (T03)             │
+│                            │            │  HIS.Data 資料存取層 / SP (T04)       │
+└─────────────┬──────────────┘            └─────────────┬────────────────────────┘
+              │                                         │
+┌─────────────▼──────────────┐            ┌─────────────▼────────────────────────┐
+│ SQL Server (推測) + SP     │  (schema   │ 同一 DB（Phase 1 不動 schema）        │
+│ PCS_Ip_Config / PUB_Config │   不動)    │ + 院區設定表 (T02)                    │
+└────────────────────────────┘            └──────────────────────────────────────┘
+┌────────────────────────────┐            ┌──────────────────────────────────────┐
+│ 批次 exe ×262 (VB)         │  ──────▶   │ HIS.Batch 統一批次主機 (C# console)   │
+│ 本機獨立程式 ×? (未盤點)   │            │  單一 host + job 註冊；排程不變        │
+└────────────────────────────┘            └──────────────────────────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>HIS.Client（C# WinForms）</strong>：每支 VB Form 對應一支 C# Form。表單只做 UI 與呼叫服務；所有 SQL、院區判斷、檢核邏輯搬出去（分別是 T04、T02、T03 的產出）。</li>
+    <li><strong>HIS.Shared Kernel</strong>：Context（登入者、院區、站台、IP）、共用 DTO、錯誤處理、Logging、IC 卡／印表／條碼 wrapper。這一層要在轉換量產前先做好，否則 3,900 支程式各自長出一套。</li>
+    <li><strong>HIS.Services（WCF）</strong>：維持 WCF（規格 貳-一-(一)-4 明示 WCF 要支援 HTTP/HTTPS，等於指定 WCF 留下）。依附錄的 67 個子系統切 ServiceContract；不做微服務。</li>
+    <li><strong>HIS.Batch</strong>：262 支批次收斂到一個 host（一個 exe，多個 job class），排程時間與參數沿用；日誌與失敗告警集中。</li>
+    <li><strong>資料庫</strong>：Phase 1 原則上不動 schema（只加 T02 的設定表）。三院是否共用一個 DB 或各自一個 DB，會決定 Context 的設計，規格未載明。</li>
+    <li><strong>.NET 版本決策（建議）</strong>：Phase 1 用 <strong>.NET Framework 4.8 + C#</strong>。理由：(1) WCF 服務端原生支援，CoreWCF 在 .NET 8 上可行但多一層風險；(2) VB 與 C# 組件可在同一個 solution 混編、同一 CLR 互相參照，這是能做 strangler 逐模組替換的前提；(3) 院內 Client 端 OS 與 .NET runtime 現況未知。若院方要求 .NET 8，估算加 15–20%。<strong>需院方拍板。</strong></li>
+  </ul>
+  <h3>遷移策略（這是本任務成敗的核心）</h3>
+  <ul>
+    <li><strong>工具轉換為主、人工修整為輔，不逐支手寫。</strong>3,900 支手寫在 300 天內不可能。用 Roslyn 型 VB→C# 轉換器（ICSharpCode CodeConverter 這類，或自建）做第一輪，配上我們自己寫的 Roslyn analyzer／code-fix 批次處理已知模式：內嵌 SQL 字串（→T04 標記）、院區 if-else（→T02 標記）、<code>On Error Resume Next</code>、late binding（<code>Option Strict Off</code>）、<code>My.*</code>、Form 預設實例（<code>Form1.Show()</code>）、<code>IIf</code> 非短路、整數除法 <code>\</code>、<code>Option Compare Text</code> 字串比較、<code>Microsoft.VisualBasic</code> 執行期函式（<code>Mid/Len/Format/CInt</code>）。決策點：是否允許新程式碼繼續參照 <code>Microsoft.VisualBasic.dll</code>（快但髒）——建議只允許 Phase 1 過渡使用，並以 analyzer 統計殘留量。</li>
+    <li><strong>先做 Pilot 校準，再量產。</strong>選 1 個門診小子系統（例如轉介櫃檯或科室作業，程式數 30–60 支）走完全流程：轉換 → 修整 → 套用 T02/T03/T04 框架 → 對照測試。用它量出「每支程式的實際人日」與轉換器成功率，再重估整體。這是前 6 週最重要的事。</li>
+    <li><strong>模組順序</strong>：醫療共用（8）→ 門診（27）→ 住院（25）→ 急診（7）。共用先做是因為 IC 卡、認證授權、共用系統是所有人的依賴；門診量最大、程式相似度高（掛號／批價／醫囑）最適合量產；急診放最後，因為急診醫囑／藥局大量重用門診與住院已轉好的元件，且急診 24 小時運作，最不適合當白老鼠。</li>
+    <li><strong>內部 strangler、對外一次上線。</strong>開發期間用混語言 solution 逐子系統替換，隨時可以組出「部分 C#、部分 VB」的可跑版本做回歸測試；但規格 貳-一-(一)-5 要求整合測試完成後才在斗六／成大上線，所以對使用者是一次切換（T06）。切換前必須有平行驗證（同一輸入，新舊系統輸出比對），特別是批價、健保申報、藥局的金額與數量。</li>
+    <li><strong>與總院同步（T05）</strong>：轉換期間總院 VB 程式持續改。策略是「凍結點 + 差異重轉」：每支程式記錄轉換時的 VB 版本（commit hash），T05 定期 diff 總院新版，改動小的直接在 C# 端手改、改動大的重跑轉換器。因此<strong>版本庫歷史是 P0 資料</strong>，沒有它就無法知道哪些程式在我們轉換之後又被改了。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>基準數量 3,647 + 262 = 3,909 支（本機獨立程式未計）。依複雜度分三級，假設工具轉換成功後的人工修整＋套框架＋單元／對照測試的人日：</p>
+  <ul>
+    <li>A 級 簡單查詢／維護／報表畫面，約 50%：0.5 人日／支</li>
+    <li>B 級 一般作業畫面（掛號、櫃台、護理站書記等），約 35%：1.5 人日／支</li>
+    <li>C 級 核心複雜（門診／住院／急診醫囑、批價、健保申報、IC 卡、藥局、手術麻醉），約 15%：6 人日／支</li>
+  </ul>
+  <p>加權平均 = 0.5×0.5 + 0.35×1.5 + 0.15×6 ≈ 1.68 人日／支 → 3,909 × 1.68 ≈ 6,560 人日 ÷ 21 ≈ <strong>312 人月</strong>，取 300 人月。這不含 T02／T03／T04 的框架設計本身（另計）、T05 的同步合併、T06 上線。區間：若程式碼乾淨、轉換器成功率高、院方有既有測試案例 → 約 180 人月；若必須大量手寫（例如程式嚴重依賴 late binding 與泛用 SQL 介面，轉換器產出不可用）→ 600 人月以上。</p>
+  <p><strong>時程含意</strong>：Phase 1 為 300 天（約 10 個月），扣掉整合測試與兩院上線至少 2 個月，開發窗口約 7–8 個月 → 需要 <strong>35–45 位</strong>開發＋測試人力同時投入。這是投標前就要面對的人力問題，不是專案管理可以解決的問題。</p>
+  <p>會讓估算大幅移動的因素：(1) 實際程式行數與每支平均大小（我們現在只有「支數」）；(2) 內嵌 SQL 的比例與是否有泛用 ExecuteSql 介面；(3) 是否有任何自動化測試或測試案例；(4) 本機獨立程式盤點結果；(5) .NET 版本決策；(6) 院方能配合的驗收測試人力。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>健保業務規則</strong>：門急診健保、住院健保、事前審查、重大傷病、P4P/TCPI、健保試辦計畫這些子系統的邏輯是法規邏輯，「功能一致」意味著申報檔格式與金額計算一個位元都不能差。我們需要懂健保申報格式（門診／住院醫療費用點數申報）的人在測試設計中。</li>
+    <li><strong>IC 卡（健保卡）作業</strong>：醫療共用的 IC 卡子系統依賴健保署讀卡機控制軟體 SDK（cshis.dll 這類），VB 的 P/Invoke 宣告轉 C# 時 marshalling 極易出錯；且測試要有測試卡與 SAM 卡環境。</li>
+    <li><strong>醫囑與藥局流程</strong>：醫囑檢核（劑量、交互作用、過敏）、給藥確認、配奶室奶囑、化療（腫瘤中心）等都是病安高風險，轉換後的行為差異可能直接傷害病人。這類程式的對照測試要有臨床藥師或資深護理資訊人員參與。</li>
+    <li><strong>VB.Net 語意陷阱</strong>：上面遷移策略列的那一串（Option Strict Off、IIf、整數除法、字串比較、Nothing 對值型別的意義、<code>Err</code> 物件）。這些不是語法問題，是「同樣的程式在 C# 跑出不同結果」的問題，轉換器不會幫你抓。</li>
+    <li><strong>15 年程式碼的考古</strong>：沒有文件的死程式、被複製貼上十次的批價邏輯、只有某位已離職同仁知道為什麼的 hard-code 日期。我們需要院內 HIS 組每個子系統的 owner 名單。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T02.html">T02</a> — 院區差異參數化的<strong>設計</strong>必須在量產轉換前定案（CampusContext 介面、設定優先序、策略對映方式）。否則轉換好的 3,900 支程式之後要再改一次去接 Context，等於做兩遍。我們設定「T02 設計凍結」為量產轉換的 gate，時間點約第 6–8 週；T02 的實作（把所有差異搬進設定表）則與 T01 平行、逐子系統進行。</li>
+    <li>非正式前置（設計 gate，不列入 depends_on）：<a href="./T03.html">T03</a> 檢核引擎的介面與 <a href="./T04.html">T04</a> 資料存取層的介面同樣要在量產前凍結，但它們的完成反過來依賴 T01 的進度，所以我們把它們的關係定為「T03／T04 依賴 T01」，並在 T01 內設計 gate。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T03.html">T03</a>、<a href="./T04.html">T04</a> — 逐支程式套用檢核引擎／搬 SQL 的工作，是隨 T01 轉換每支程式時一起做的。</li>
+    <li><a href="./T05.html">T05</a> — 同步總院增修的前提是每支程式有「轉換基準版本」。</li>
+    <li><a href="./T06.html">T06</a> — 斗六／成大上線的東西就是 T01 的產出。</li>
+    <li><a href="./T07.html">T07</a>～<a href="./T14.html">T14</a>、<a href="./T16.html">T16</a> — 老醫功能都是在 C# 版上開發的。</li>
+    <li><a href="./M02.html">M02</a> — 技術移轉的對象是新程式碼與新架構文件。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>T01 本身不新增設備介接，但改寫範圍內既有的裝置呼叫必須原樣保留並在 C# 下重新驗證；這些多半是 P/Invoke 或 COM 呼叫，是轉換時最容易壞又最難在開發機測的部分。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>健保 IC 卡讀卡機（醫療共用「IC 卡」子系統）</td><td>健保署讀卡機控制軟體 API（DLL，P/Invoke）</td><td>健保署／院方現有 DLL 版本與宣告檔</td><td>讀卡機、測試用健保卡與 SAM 卡、健保 VPN 測試環境</td></tr>
+      <tr><td>報表／標籤／藥袋印表機</td><td>Windows 列印、可能有 ESC/POS 或原廠 DLL</td><td>院方現行 Client 環境清單</td><td>與院內相同型號印表機與範本</td></tr>
+      <tr><td>條碼／QR 掃描、簽名板等（若有）</td><td>鍵盤模擬或序列埠、COM 元件</td><td>院方盤點（規格未載明）</td><td>實機</td></tr>
+      <tr><td>外部系統（LIS、PACS、MIS 等 26 個，見 X01）</td><td>HL7／DB view／檔案交換（推測）</td><td>各系統廠商，依 貳-二-(二) 由院方協調</td><td>介接測試環境，Phase 1 至少要能回歸測試現有介接不壞</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td><strong>完整現行原始碼</strong>：所有 VB.Net 專案（線上 3,647 支、批次 262 支）、本機獨立程式、DB schema／DDL、stored procedures、view、function、app.config／web.config、建置腳本、<strong>版本庫完整歷史</strong>（TFS/SVN/Git）</td><td>資訊室 HIS 組</td><td>沒有原始碼，連估算都是猜的，投標人力規劃與 300 天時程都無法承諾；沒有版本歷史，T05 的同步無從比對，也無法知道哪些程式其實已死。這是投標前就應以保密協議取得（至少抽樣）的資料。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>可建置（build）並在測試環境跑起來的現行系統：solution 檔、相依 DLL（IC 卡、報表元件、第三方控制項與授權）、測試 DB 備份（去識別化）</td><td>資訊室 HIS 組、DC 組</td><td>轉換器要對「能編譯的程式碼」才有意義；沒有測試 DB，對照測試無法做。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>技術決策確認：UI 維持 WinForms？.NET Framework 4.8 或 .NET 8？資料庫版本？Client 端 OS／runtime 現況？三院是一個 DB 還是各自一個？</td><td>資訊室 HIS 組（決策）、DC 組（環境）</td><td>規格未載明；每一項都會改變架構與估算 ±20% 以上。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>各子系統 owner 名單（67 個子系統）、現行系統文件（程式設計書、資料字典）、已知問題清單</td><td>資訊室 HIS 組</td><td>沒有 owner 就沒有人能回答「這段為什麼這樣寫」與驗收「功能一致」。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>本機獨立程式盤點（規格說「之後盤點」）：清單、用途、執行頻率、原始碼是否存在</td><td>資訊室 HIS 組 + 各使用單位</td><td>範圍不確定就是變更爭議來源；盤點結果要寫進工作計畫書（M01）當範圍基準。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>現有測試案例／驗收腳本／使用者操作手冊；批次作業排程表與參數</td><td>資訊室 HIS 組</td><td>「功能一致」的判準需要基準。沒有的話我們要自己從程式反推測試案例，A 級程式每支多 0.3 人日。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>開發／測試環境與遠端連線授權（伍-四），含 IC 卡測試環境、健保測試 VPN</td><td>資訊室 DC 組、資安承辦</td><td>35–45 人團隊若無法及早進場或遠端開發，7–8 個月的開發窗口直接縮短。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>第三方控制項與元件的授權（報表引擎、Grid 控制項等）可否延用於 C# 版本；SDK 是否有 .NET 8 版</td><td>資訊室 HIS 組、各元件原廠</td><td>影響 .NET 版本決策與採購時程。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>量 × 時程 × 人力不成立</strong> — 3,900 支在 7–8 個月開發窗口內轉完，需要 35–45 人同時投入且轉換器成功率要高。人力若只有 15–20 人，Phase 1 必然逾期，而 Phase 1 是 50% 付款。投標前要做 Pilot（哪怕只用抽樣程式碼）驗證每支人日。</li>
+    <li><strong>原始碼不完整或不能建置</strong> — 15 年系統常見：某些 DLL 沒有原始碼、某些程式線上版本與版本庫不一致。任何一種都會讓「功能一致」變成無法驗證。</li>
+    <li><strong>「功能一致」沒有客觀判準</strong> — 沒有測試案例、沒有規格文件時，驗收會變成使用者主觀比對。必須在 M01 工作計畫書內定義驗收方式（對照測試清單 + 平行運行期間的差異率門檻）。</li>
+    <li><strong>移動的目標（T05）</strong> — 轉換期間總院持續改版，健保署規則改就得改。若無版本紀律（每支程式的基準 hash）與定期合併節奏，最後會有「不知道哪一版才對」的混亂。</li>
+    <li><strong>VB 語意差異造成靜默錯誤</strong> — 尤其批價金額、日期處理、字串比較。這種錯誤不會當機，會在申報時被健保署核刪才發現。對策：C 級程式強制做新舊系統輸出比對，而非只做功能測試。</li>
+    <li><strong>T02／T03／T04 設計太晚凍結</strong> — 轉好的程式要回頭改。對策：前 8 週集中做框架與 Pilot，量產前必須 gate。</li>
+    <li><strong>院方配合測試人力</strong> — 貳-三-5 要求與院方使用者及資訊人員共同測試；67 個子系統要各單位派人，院方能否排出這麼多人是我們控制不了的。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>現行架構是否確為 WinForms + WCF + SQL Server？WCF 是 IIS host 還是 Windows Service？有無 ASP.NET Web 部分（「前後端程式」的「前端」指什麼）？</li>
+    <li>「3,647 支線上作業」的計數單位是 Form、專案、還是功能選單項？每支平均行數？</li>
+    <li>斗六分院與成大是同一套程式碼、同一個 DB，還是分別部署？差異目前用什麼機制切換（設定檔、IP、機構代號）？（同 T02）</li>
+    <li>院方是否接受 Phase 1 維持 WinForms、不改 UI 典範？是否接受 .NET Framework 4.8？</li>
+    <li>轉換過程中是否允許 C# 程式碼暫時參照 Microsoft.VisualBasic 執行期程式庫？驗收時是否要求零殘留？</li>
+    <li>「原始程式碼（電子檔）」交付是否包含我們的轉換工具與 Roslyn analyzer？智財歸屬如何（伍-一-14 說機關資料屬機關所有）？</li>
+    <li>批次程式目前的排程器（Windows Task Scheduler／SQL Agent／其他）與監控方式？可否收斂為單一批次 host？</li>
+    <li>院方是否有可用的測試 DB（去識別化）與資料量級？平行驗證期間能否取得正式環境的輸入資料重播？</li>
+    <li>本機獨立程式的盤點由誰負責、何時完成、算不算 Phase 1 範圍？</li>
+    <li>驗收「功能一致」的判準：以子系統為單位的對照測試清單是否可行？誰簽核？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

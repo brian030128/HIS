@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H02 診間叫號機系統介接 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · hardware</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">H02</div>
+  <h1>診間叫號機系統介接（開發）</h1>
+  <p class="lede">讓老人醫院門診的掛號報到、醫師看診狀態能即時推到診間門口顯示器、候診區電視與語音廣播，並處理過號、插號、多診間與代診。叫號機是廠商設備，HIS 這一側要做的是「狀態來源」與「號序規則」；老醫是高齡病人為主，大字體、語音、過號友善都會被要求。規格未載明廠牌與協定。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-yes">有（叫號主機、診間顯示器、候診區電視、語音、診間按鈕盒、報到機）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 5 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> · <a href="./T02.html">T02</a> · <a href="./T07.html">T07</a> · <a href="./T09.html">T09</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T15.html">T15</a> · <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)-2、貳-一-(二)-1、貳-二-(二)、附錄（門診：掛號系統、門診醫囑系統、全院排程）</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(三)：須開發的外部介接介面程式 —「2. 診間叫號機系統」。</p>
+    <p>貳-一-(二)-1：查詢老人醫院及成大醫院掛號資料，並辦理掛號。</p>
+    <p>貳-二-(二)：老人醫院所需介接的院內其他系統，本院會請相關單位或廠商提供標準介接說明供得標廠商開發。</p>
+    <p>貳-一-(五)：上線順序配合老人醫院硬體設備及開院時程。</p>
+  </blockquote>
+  <p>叫號機廠牌、顯示器型式、是否含語音與報到機、是否與跨院掛號（T09）的號序整合，<strong>規格未載明，需確認</strong>。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>台灣醫院叫號幾乎都是「HIS 是狀態的唯一來源，叫號廠商負責顯示與播音」。最常見的介接是 HIS 提供一張 View 或交換表（診間、目前號、下一號、醫師、開診狀態），叫號主機每 1～3 秒輪詢；較新的做法是 HIS 在狀態變更時主動以 HTTP/TCP 推播到叫號中介軟體。我們建議新 C# 版本兩者都做：主動推播為主、View 輪詢為備援，因為廠商能配合哪一種要等採購結果。</p>
+  <pre class="diagram">
+┌──────────────┐   報到    ┌──────────────────┐   看診狀態變更    ┌──────────────────┐
+│ 報到機/櫃台  │ ────────▶ │ HIS 掛號系統     │ ◀──────────────── │ HIS 門診醫囑     │
+│ (IC卡/條碼)  │           │ 預約號/現場號    │  叫號/看診中/完診  │ 醫師按「下一位」  │
+└──────────────┘           │ 報到、過號、插號 │  代診/休診        └──────────────────┘
+                           └────────┬─────────┘
+                                    │ 號序規則引擎 (新 C#，院區參數化 T02)
+                                    ▼
+                           ┌──────────────────┐  ①推播 HTTP/TCP   ┌──────────────────┐
+                           │ 叫號介接服務     │ ────────────────▶ │ 叫號主機/中介軟體│
+                           │ Queue API + View │ ◀──────────────── │ (叫號機原廠)     │
+                           │ 事件紀錄/重送    │  ②輪詢 View (備援) └───────┬──────────┘
+                           └──────────────────┘                          │ 廠商私有協定
+                                    │ 手機查詢 (選配)             ┌───────┴────────────────┐
+                                    ▼                            ▼           ▼            ▼
+                           ┌──────────────┐               ┌──────────┐ ┌──────────┐ ┌──────────┐
+                           │ 院外 Web/LINE│               │診間門口屏│ │候診區電視│ │ 語音廣播 │
+                           └──────────────┘               └──────────┘ └──────────┘ └──────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>號序來源</strong>：掛號系統配號（預約號、現場號、加號）；報到後進入候診佇列；門診醫囑端醫師按「叫號／下一位」或開立醫令即進入「看診中」，完診出佇列。這些狀態現在都在 VB.Net 掛號與門診醫囑裡，T01 改寫時要把它們整理成明確的狀態機而非散落的 if-else。</li>
+    <li><strong>號序規則引擎</strong>：過號規則（過號後補幾號、是否重排到末端）、插號（急診轉門診、身心障礙、80 歲以上優先──老醫會大量用到）、同一診間多醫師、上下午診切換、代診與休診公告。各院規則不同，用 T02 的參數表管理。</li>
+    <li><strong>叫號介接服務</strong>：新 C# 後端提供 Queue API（每診間目前號、候診清單、公告）與事件推播；同時維持相容 View 給只能輪詢的廠商。所有推播留事件紀錄，可重送。</li>
+    <li><strong>叫號廠商端</strong>：叫號主機接收後驅動顯示器（LED 字幕機多為 RS-485／TCP 私有協定、Android 看板走 HTTP）、語音（TTS 或錄音檔）、診間按鈕盒（有些院所醫師不用 HIS 叫號而按實體按鈕，那就變成廠商端反向回寫 HIS「叫號」事件，要另接一個回寫 API）。</li>
+    <li><strong>跨院掛號（T09）</strong>：在老醫替成大掛號的病人，號序屬於成大那邊的診間，不進老醫叫號；但老醫掛老醫的號要立刻進本院佇列。介接服務只認本院區佇列。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>約 5 人月：狀態機與號序規則整理（含現況盤點）1、Queue API／推播／相容 View／回寫 API 1.5、掛號與門診醫囑端配合修改 1、模擬器（假叫號主機 + 假顯示器網頁）0.5、廠商聯測與老醫現場調校 1。若廠商只支援私有 TCP 協定且無文件，加 1 人月；若要 HIS 自建候診電視網頁（不靠廠商看板），再加 1 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>門診號序制度</strong>：預約號段與現場號段、看診序 vs 報到序、過號補位規則、初診／複診差別、加號權限。每家醫院都不同，成大三院也未必一致，這是 T02 參數化最典型的案例。</li>
+    <li><strong>診間排程</strong>：醫師代診、臨時停診、診間互換、同一診間上午下午不同醫師、教學診（一位主治多位住院醫師同時看）；「全院排程」子系統是資料來源。</li>
+    <li><strong>高齡友善</strong>：老醫要大字體、慢速語音、重複播報、過號不罰（過號後仍優先補位）、家屬手機查詢。這些多半是廠商顯示端的事，但過號規則是我們的。</li>
+    <li><strong>即時性與一致性</strong>：醫師按下一位到顯示器更新要在 1～2 秒內，且候診區電視、門口小屏、語音三者不能不一致；推播失敗要有備援輪詢。</li>
+    <li><strong>個資</strong>：顯示器上能不能顯示姓名？多數醫院只顯示號碼或遮罩姓名（王○明）。要院方定一個規則並院區參數化。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 掛號系統、門診醫囑系統改寫為 C# 後才有狀態機與 API 掛載點；舊 VB.Net 的叫號介接程式是基準。</li>
+    <li><a href="./T02.html">T02</a> — 號序規則、顯示規則、叫號主機端點全部院區參數化。</li>
+    <li><a href="./T07.html">T07</a> — 訪談確認老醫診間數、候診區配置、高齡友善需求。</li>
+    <li><a href="./T09.html">T09</a> — 跨院掛號的號序歸屬要先定，叫號佇列才知道哪些號要進本院。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T15.html">T15</a> — Client 端與叫號主機的網路、IP、帳號設定。</li>
+    <li><a href="./T16.html">T16</a> — 老醫開院日門診必須能叫號。</li>
+    <li><a href="./H05.html">H05</a> — 刀房叫號機很可能是同一家廠商、同一套看板平台，介接服務可共用推播機制。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>我們不直接驅動顯示器，但必須與叫號主機（或中介軟體）對接，且測試時需要看得到畫面、聽得到聲音。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>叫號主機／中介軟體</td><td>最可能：SQL Server View 輪詢；或 HTTP JSON 推播；或 TCP socket 私有協定。規格未載明。</td><td>叫號機原廠 + 資訊室 HIS 組（總院現行介接規格）</td><td>廠商測試主機一台（可放我們辦公室）或廠商測試伺服器；自寫模擬器做日常開發</td></tr>
+      <tr><td>診間門口顯示器（LED 字幕機／小型 Android 屏）</td><td>由叫號主機驅動（RS-485、TCP 私有協定）；HIS 不直連</td><td>叫號機原廠</td><td>聯測時至少一片實機看顯示格式與延遲</td></tr>
+      <tr><td>候診區電視／看板</td><td>廠商看板軟體（Android/Windows）或 HIS 自建網頁（Chrome kiosk）</td><td>叫號機原廠；自建則我們</td><td>一台電視或大螢幕；自建網頁可用瀏覽器測</td></tr>
+      <tr><td>語音廣播</td><td>叫號主機 TTS 或錄音檔，經擴音系統</td><td>叫號機原廠</td><td>聯測時現場驗證（台語／國語播報順序是院方需求）</td></tr>
+      <tr><td>診間按鈕盒（若醫師不用 HIS 叫號）</td><td>USB/RS-232 到診間 PC 或直連叫號主機 → 回寫 HIS API</td><td>叫號機原廠</td><td>一個按鈕盒實機，或廠商提供回寫 API 模擬</td></tr>
+      <tr><td>報到機（自助報到）</td><td>健保 IC 卡讀卡機 + 條碼；呼叫 HIS 報到 API</td><td>報到機原廠 + 健保署讀卡機規格</td><td>一台報到機或以櫃台報到程式代替</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>總院現行叫號介接的 VB.Net 程式原始碼、View／交換表 DDL、推播協定文件、叫號機廠商名稱與型號；掛號與門診醫囑中「叫號／看診中／完診／過號」狀態的寫入點清單</td><td>資訊室 HIS 組</td><td>成大、斗六都在跑；沒有現況就無法設計狀態機，T01 改寫也會漏掉狀態寫入點。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>老人醫院叫號設備採購決定：廠牌、是否與總院同廠、診間數、顯示器與電視配置、是否含語音／報到機／手機查詢、到貨安裝時程</td><td>老人醫院籌備處／採購組</td><td>廠牌決定協定；到貨太晚聯測就只能在 Phase 3 硬幹。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>叫號機原廠介接規格（API/協定/View 欄位）、一台測試主機或測試伺服器、技術窗口</td><td>叫號機原廠（經資訊室或籌備處引介）</td><td>沒有測試主機只能對模擬器開發，顯示格式與延遲問題到現場才會發現。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>三院的號序規則文件：預約／現場號段、過號補位、插號優先類別、代診休診處理</td><td>資訊室 HIS 組／門診部／老醫籌備處</td><td>這是 T02 參數表的內容；沒有就只能照總院硬寫，老醫上線再改。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>顯示器上病人識別的規則（號碼／遮罩姓名）與語音語言順序</td><td>老醫籌備處／個資窗口</td><td>影響 API 回傳欄位與個資合規。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>總院測試環境上的叫號 View 連線與去識別化樣本資料</td><td>資訊室 HIS 組／DC 組</td><td>Phase 1 即可先驗證相容 View。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>設備廠牌與到貨時程不在我們手上</strong> — 老醫硬體另案採購，開院時程也還在動（規格 貳-一-(五)）。</li>
+    <li><strong>狀態寫入點散落</strong> — VB.Net 掛號與門診醫囑中改狀態的地方可能有幾十處，T01 改寫時若沒盤清楚，叫號會漏更新，這種 bug 上線第一天就會被投訴。</li>
+    <li><strong>廠商私有協定無文件</strong> — LED 字幕機廠商常只給 DLL 不給協定；若叫號主機也如此，我們就被綁在該廠商的 Windows DLL 上，與 C# 後端架構相衝。</li>
+    <li><strong>三院規則不同但共用程式碼</strong> — 參數化做不乾淨會回到 if-else 地獄。</li>
+    <li><strong>與 T09 跨院掛號的號序歸屬</strong> — 若定義不清，跨院掛的號可能出現在錯的院區佇列。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>總院目前叫號是 HIS 主動推播還是廠商輪詢 View？延遲多少？有無備援？</li>
+    <li>老醫醫師是用 HIS 畫面叫號，還是實體按鈕盒？兩者並存要不要支援？</li>
+    <li>候診區電視要走廠商看板還是 HIS 自建網頁？（自建可減少對廠商依賴，但工作量加 1 人月）</li>
+    <li>過號規則：老醫是否採「過號不罰、隨到隨補」？與總院是否不同？</li>
+    <li>是否要提供院外手機／LINE 查詢候診進度？（若要，API 對外暴露要走 M03 資安審查）</li>
+    <li>檢查室（抽血、X 光、超音波）叫號是否也算在本任務？規格只寫「診間」。</li>
+    <li>跨院掛號（T09）在老醫掛成大的號，是否要在老醫顯示成大的候診進度？</li>
+    <li>顯示器與語音是否需支援台語？由誰產生語音檔？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

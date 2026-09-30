@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H04 PACS 系統介接（開發） — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · hardware</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">H04</div>
+  <h1>PACS 系統介接（開發）</h1>
+  <p class="lede">老人醫院的影像檢查醫令要能流到 PACS／RIS，讓 X 光、CT、超音波等儀器從 Modality Worklist 取得病人與檢查資料，影像與報告完成後回到 HIS，醫師在醫囑畫面一鍵開影像。這是放射科作業流程（order → schedule → acquire → report）的整條資料鏈；規格只寫「PACS 系統」，未說老醫 PACS 是獨立一套還是與總院共用、有沒有 RIS、報告走哪個系統。介接本身是軟體對軟體，但 worklist 那一端直接面對儀器，測試需要真的或模擬的 modality。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（PACS 為軟體系統，worklist 面對儀器）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 6 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a>、<a href="./T02.html">T02</a>、<a href="./T07.html">T07</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T12.html">T12</a>、<a href="./T14.html">T14</a>、<a href="./X01.html">X01</a>、<a href="./T15.html">T15</a>、<a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)-4、貳-一-(三) 測試表 #27、貳-一-(二)-4、貳-一-(二)-7、貳-二-(二)</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>貳-一-(三)：須開發的外部介接介面程式 …… 4. PACS 系統。須測試的外部介接介面程式 …… #27 檢查報告系統。<br>
+  貳-二-(二)：老人醫院所需介接的院內其他系統（如 LIS、MIS、PACS 等），本院會請相關單位或廠商提供標準介接說明供得標廠商開發。<br>
+  貳-一-(二)-4：查詢及預約老人醫院及成大醫院檢查排程。<br>
+  貳-一-(二)-7：數據整合中台 …… 跨院資源共享：掛號資訊、床位資訊、檢查科室儀器排程 ……<br>
+  附錄子系統：門診「全院排程」、「門診醫囑系統」；住院「住院醫囑系統」。</blockquote>
+  <p>規格未載明 PACS 廠牌、老醫是否共用總院 PACS、是否有獨立 RIS、報告系統是否即 #27「檢查報告系統」、HL7 版本與訊息型別。均需確認。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>放射科標準模式（IHE Scheduled Workflow）：HIS 開立檢查醫令並產生檢查單號（accession number），以 HL7 v2 ORM 送給 PACS／RIS 的 HL7 broker；PACS／RIS 據此提供 DICOM Modality Worklist（MWL）給儀器；儀器完成後影像進 PACS，PACS 以 HL7 訊息或狀態回呼通知 HIS「已檢查／影像到達」；放射科醫師在報告系統打報告，以 HL7 ORU 或報告連結回到 HIS。HIS 端另外要負責病人基本資料異動（ADT A08／合併病歷 A40）同步到 PACS，以及從醫囑／病歷畫面帶 accession number 開啟 viewer。若老醫沒有 RIS、PACS 也不做 worklist，HIS 就得自己當 MWL SCP（用 fo-dicom 之類的 .NET 函式庫），這會把難度往上拉一級。</p>
+  <pre class="diagram">
+┌──────────────────────┐  ORM^O01 (new/cancel/update)  ┌──────────────────────┐   DICOM MWL C-FIND    ┌────────────┐
+│ HIS 檢查醫令／全院排程 │ ────────────────────────────▶ │ PACS / RIS HL7 broker │ ◀──────────────────── │ Modality   │
+│ (門診／住院醫囑, C#)  │  ADT^A08 / A40 病人異動        │ (原廠)                │   影像 C-STORE ──────▶│ CT/X光/超音波│
+│ 檢查單號 = accession  │ ────────────────────────────▶ │                      │                       └────────────┘
+└──────────────────────┘                               └──────────────────────┘
+        ▲                                                        │
+        │  狀態回呼（已檢查／影像到達） ORU / ORM status / 原廠 API   │
+        │ ◀──────────────────────────────────────────────────────┘
+┌──────────────────────┐   ORU^R01 報告內容或報告 URL     ┌──────────────────────┐
+│ HIS 報告查詢／病歷     │ ◀────────────────────────────── │ 檢查報告系統 (#27)     │
+│ viewer 啟動 (URL+SSO) │ ──────────────────────────────▶ │ PACS viewer          │
+└──────────────────────┘                                 └──────────────────────┘
+  介接層：HIS ↔ HL7 引擎（MLLP 收發、訊息記錄、重送）為獨立服務；老醫院區代碼進 accession 前綴（T02）
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>醫令下送</strong>：檢查醫令開立／排程／取消／改期 → ORM^O01（或 OMI／OMG，依原廠）。欄位：病歷號、姓名、性別、生日、檢查項目碼（院內碼 ↔ PACS procedure code 對照）、預約時間、儀器室、開單醫師、accession number。</li>
+    <li><strong>Accession number 規則</strong>：三院同一套 HIS 後，檢查單號要全院區唯一且可辨識院區，這是 T02 參數化要處理的規則；若老醫與總院共用 PACS，衝突就是資料災難。</li>
+    <li><strong>病人資料同步</strong>：改名、改生日、合併病歷要推到 PACS，否則影像掛錯人。</li>
+    <li><strong>狀態回收</strong>：已報到、已檢查、影像到達、報告完成（初／確認）。HIS 檢查狀態、住院醫囑執行狀態、跨院檢查排程查詢（T12）都吃這條。</li>
+    <li><strong>報告與影像檢視</strong>：報告內容進 HIS（或只存連結），醫師從醫囑／病歷帶 accession number 開 viewer；viewer 認證方式（token、AD SSO）與 M03 相關。</li>
+    <li><strong>HL7 引擎</strong>：MLLP 監聽與發送、ACK 處理、訊息儲存與重送、對照表維護；建議做成通用元件，H04 之外 LIS 等 X01 測試項也可能用到。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>HL7 收發引擎與訊息記錄 1 人月；醫令 ORM 下送與取消／改期、ADT 同步 1 人月；狀態與報告回收、HIS 狀態更新 1 人月；viewer 啟動與 SSO 0.5 人月；檢查項目對照維護 0.5 人月；與 PACS 原廠聯測、模擬儀器測試、上線陪同 1.5 人月；文件 0.5 人月。合計約 6 人月。若 HIS 需自行提供 DICOM MWL SCP（無 RIS 情境），另加 2 人月；若老醫 PACS 與總院共用且只需擴院區碼，可減 1.5 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>放射科流程與 IHE SWF</strong>：order、scheduled procedure step、MPPS、影像到達、報告狀態等概念，以及 accession number／study instance UID 的關係；沒做過 PACS 介接的人容易把「醫令」和「檢查」一對一綁死，實際上一張醫令可能拆成多個檢查、多次補照。</li>
+    <li><strong>HL7 v2 實務</strong>：各家 PACS 的 Z-segment、欄位對應和 ACK 行為都不同，conformance statement 是必需品。</li>
+    <li><strong>DICOM 基礎</strong>：至少要能讀懂 MWL 的 query keys 與儀器端會用哪些欄位，才能在聯測時判斷是我們的資料錯還是儀器設定錯。</li>
+    <li><strong>院內檢查項目主檔</strong>：院內檢查碼與 PACS procedure code、儀器室、健保醫令碼的多對多對照，老醫是否沿用總院主檔要在 T07 確認。</li>
+    <li><strong>跨院影像</strong>：轉檢與代檢（T14）會有「在老醫開單、在總院照」的情境，影像與報告要回得到老醫，涉及兩院 PACS 是否互通與病歷號對應。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 門診／住院醫囑、全院排程改寫成 C# 後才有醫令事件可掛 HL7 發送；HL7 引擎應依 T01 的後端架構設計。</li>
+    <li><a href="./T02.html">T02</a> — PACS 端點、院區碼、accession 規則、檢查項目對照皆為院區參數。</li>
+    <li><a href="./T07.html">T07</a> — 老醫影像檢查範圍（有哪些儀器、是否有放射科醫師駐診、報告由誰打）在訪談確認。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T12.html">T12</a> — 跨院檢查排程查詢與預約需要老醫檢查狀態與儀器排程回饋。</li>
+    <li><a href="./T14.html">T14</a> — 轉檢／代檢流程需要影像與報告跨院回傳。</li>
+    <li><a href="./X01.html">X01</a> — #27 檢查報告系統的介接測試與本任務的報告回收共用同一條路，需一起排測試。</li>
+    <li><a href="./T15.html">T15</a>、<a href="./T16.html">T16</a> — 老醫上線環境需部署 HL7 服務、開通與 PACS 的連線；開院即需影像檢查。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>HIS 不直接連儀器，但 worklist 是否正確要在儀器端驗證；PACS 原廠系統是黑箱。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>PACS／RIS HL7 broker（老醫獨立或與總院共用，規格未載明）</td><td>HL7 v2.x over MLLP：ORM^O01／OMG、ADT^A08／A40、ORU^R01 或原廠 REST API</td><td>PACS 原廠（HL7 conformance statement、欄位對照）；影像醫學部資訊窗口；資訊室 HIS 組（現行 VB.Net 介接程式）</td><td>PACS 測試環境或測試分區、HL7 測試工具（HAPI TestPanel 等）、原廠聯測時段</td></tr>
+      <tr><td>DICOM Modality Worklist（正常由 PACS／RIS 提供；若老醫無 RIS 則可能要由 HIS 提供 MWL SCP）</td><td>DICOM C-FIND（MWL）、MPPS N-CREATE／N-SET</td><td>PACS 原廠 DICOM conformance statement；若 HIS 自建則用 fo-dicom（開源，需依 M03 標示來源與授權）</td><td>模擬儀器（dcm4che／Orthanc 當 MWL SCU）＋至少一台真儀器聯測</td></tr>
+      <tr><td>影像 viewer（web 或 client）</td><td>URL 啟動帶 accession／病歷號 ＋ token 或 AD SSO</td><td>PACS 原廠</td><td>老醫 client 端環境（T15）、測試帳號</td></tr>
+      <tr><td>檢查報告系統（#27）</td><td>ORU^R01 或資料庫／API，規格未載明</td><td>影像醫學部、報告系統廠商</td><td>報告系統測試環境</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>成大現行 HIS↔PACS／RIS 介接程式（VB.Net）原始碼、HL7 訊息規格與對照表、現行 PACS 廠牌</td><td>資訊室 HIS 組、影像醫學部資訊窗口</td><td>這是最直接的樣板；沒有就無法判斷老醫可沿用多少、需要哪些訊息型別。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>老醫 PACS 架構決策：獨立 PACS 或共用總院 PACS？有無 RIS？報告由哪套系統產出？廠牌與建置時程</td><td>老人醫院籌備處、影像醫學部、資訊室</td><td>決定我們是接 HL7、還是要自建 MWL；工作量差 2 人月以上。未定就無法設計。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>PACS 原廠 HL7／DICOM conformance statement、介接說明、測試環境與聯測窗口</td><td>PACS 原廠（院方依貳-二-(二)引介）</td><td>沒有規格無法寫訊息；沒有測試環境只能在正式 PACS 上測，院方不會同意。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>檢查單號（accession）與院區碼規則、檢查項目主檔與 PACS procedure code 對照</td><td>資訊室 HIS 組、影像醫學部</td><td>三院一套 HIS 後號碼衝突會讓影像掛錯病人。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>檢查報告系統（#27）的介面文件與測試環境</td><td>影像醫學部、報告系統廠商</td><td>報告回收與 X01 測試共用，晚拿到會擠到 Phase 2 尾端。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>viewer 啟動方式與認證機制（token／AD SSO）、client 端安裝需求</td><td>PACS 原廠、資訊室</td><td>牽涉 M03 帳號與存取紀錄；T15 client 環境設定要提前知道。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>老醫儀器清單（modality 種類、台數、廠牌）與放射科人力（是否有駐診放射科醫師）</td><td>老人醫院籌備處</td><td>決定聯測範圍與報告流程（無駐診則報告可能在總院打，跨院回傳）。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>PACS 架構未定</strong> — 獨立或共用、有無 RIS，直接決定介接範圍與是否要自建 DICOM worklist；這是本任務最大的不確定性，必須在工作計畫書階段逼出答案。</li>
+    <li><strong>原廠配合度</strong> — PACS 原廠常視 HL7 介接調整為另案收費項目；規格只說院方「會請廠商提供介接說明」，沒說原廠要陪測。要請院方把聯測義務放進 PACS 採購合約。</li>
+    <li><strong>Accession／病歷號跨院衝突</strong> — 若老醫與總院共用 PACS 而病歷號體系不同，影像歸戶錯誤是病安事件；需與 T02、T09 的病人主檔規劃一起處理。</li>
+    <li><strong>狀態回收不完整</strong> — 很多 PACS 只回「影像到達」不回 MPPS，HIS 端的檢查狀態機要能容忍缺步驟。</li>
+    <li><strong>測試環境</strong> — 沒有 PACS 測試分區與模擬儀器就無法做迴歸測試；與 T15「上線前另建一組對應環境」需一併規劃。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>老醫 PACS 是獨立系統還是總院 PACS 的延伸？影像伺服器放老醫還是總院 DC？（規格未載明，需確認）</li>
+    <li>老醫有無 RIS？若無，worklist 由 PACS 提供還是要 HIS 提供？</li>
+    <li>#27「檢查報告系統」是否就是放射科報告系統，還是涵蓋內視鏡、超音波、心電圖等其他檢查？報告以內容還是連結回 HIS？</li>
+    <li>HL7 版本與訊息型別（ORM 或 OMG／OMI）、字元編碼（Big5／UTF-8）、是否有 Z-segment？</li>
+    <li>病人資料異動（改名、合併病歷）目前如何同步到 PACS？是否已有機制可沿用？</li>
+    <li>轉檢／代檢（T14）在總院照的影像如何回到老醫 HIS？兩院 PACS 是否互通？</li>
+    <li>viewer 是否需嵌入 HIS 畫面，還是外開視窗即可？</li>
+    <li>驗收標準：HL7 訊息往返通過即可，還是要從開單到儀器 worklist 顯示、影像回傳、報告回到 HIS 全流程真機驗證？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

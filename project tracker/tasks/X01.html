@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X01 內部跨系統介接測試（26 系統） — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · interface-test</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">X01</div>
+  <h1>內部跨系統介接測試（規格 #11–#36，26 個系統）</h1>
+  <p class="lede">規格把 26 個既有院內系統列為「須測試」的介接介面：從 LIS、MIS、WEB EMR 這種全院命脈，到傳呼、電子白板這種靠近硬體的，再到部立台南醫院／郭綜合醫院、疾管署 NIIS 這種跨機構的。表面上是「測試」，實際上是：T01 把 HIS 端每一條介接程式都改寫成 C#，又要在老人醫院這個全新院區（新院區代碼、新 IP、新對方系統實例）跑起來——26 條介接的 HIS 端全部是新程式，所謂測試等於 26 次整合驗證加修正。每一條介接的另一端都是別人的黑盒子，沒有對方原廠到場就測不了。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內（測試環境延伸至 Phase 3）</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-partial">部分（傳呼、電子白板顯示器）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 24 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> · <a href="./T15.html">T15</a> · <a href="./M01.html">M01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./H09.html">H09</a> · <a href="./T13.html">T13</a> · <a href="./T16.html">T16</a> · <a href="./T06.html">T06</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(三)、貳-二-(二)、貳-三-5、貳-一-(五)-1</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(三)：「<strong>須測試</strong>的外部介接介面程式：11 住院醫師排班系統、12 ADR 通報、13 傳呼、14 疾病分類輔助系統、15 病歷分類輔助系統、16 病歷品質審查系統、17 人體器官保存庫系統、18 院內感染控制系統、19 LIS、20 MIS、21 WEB EMR、22 個管系統、23 表單系統、24 麻醉管理系統、25 電子病歷管理系統、26 電子白板系統、27 檢查報告系統、28 AI 模組、29 SDM、30 Epinet 針扎／血體液曝觸、31 跨院介接：衛生福利部台南醫院、郭綜合醫院、32 NIIS 系統相關程式、33 風采透析系統、34 住院健檢身心狀況自評表、35 住院健檢營養評估表、36 住院健檢營養訂餐」。</p>
+    <p>貳-二-(二)：「老人醫院所需介接的院內其他系統（如 LIS、MIS、PACS 等），本院會請相關單位或廠商提供標準介接說明<strong>供得標廠商開發</strong>。」</p>
+    <p>貳-三-5：「程式調整完成後，需模擬新版本運作環境進行完整測試，並與本院使用者及資訊人員共同測試。」</p>
+    <p>貳-一-(五)-1：「上線前另建置一組對應環境（基礎配置資源）供測試；資訊室 HIS 組協助：跨系統、外部機構連線設定。」</p>
+  </blockquote>
+  <div class="callout warn">
+    <strong>「測試」與「開發」的邊界不清，必須在工作計畫書釐清。</strong> 標題說「須測試」，但 貳-二-(二) 說介接說明是「供得標廠商<em>開發</em>」；而 T01 改寫本來就會重寫每條介接的 HIS 端。我們的解讀：<em>對方系統不動，HIS 端介接程式隨 T01 改寫，本任務負責讓 26 條介接在（1）改寫後的 C# HIS 與（2）老人醫院新院區 兩種情境下通過驗證</em>。若院方認為老醫需要新增介接欄位、新對方系統版本或新協定，那是開發，走變更管理。規格未載明，需確認。
+  </div>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>本任務的產出不是一支系統，而是一套<strong>整合測試環境與測試工作（test harness）</strong>：對 26 條介接各建一份「介接卡」（interface card），在院方提供的測試環境裡以真實對方系統或我們寫的模擬器（stub）跑通，並留下可重複執行的測試案例供 Phase 3 三院上線回歸。</p>
+  <pre class="diagram">
+  院方測試環境（T15 「另建一組對應環境」，須含對方系統測試實例）
+  ┌───────────────────────────────────────────────────────────────────────────────┐
+  │  新版 HIS (C#, T01)  院區參數=老醫/成大/斗六 (T02)                              │
+  │  ┌────────────────────────────────────────────────────────────┐               │
+  │  │  介接層（改寫後）                                            │               │
+  │  │  DB view/table 直讀寫 │ WCF/HTTP API │ HL7 v2 (MLLP) │ 檔案交換 │ URL/SSO 啟動 │
+  │  └──┬──────────┬─────────────┬──────────────┬─────────────┬────┘               │
+  │     │          │             │              │             │                    │
+  │     ▼          ▼             ▼              ▼             ▼                    │
+  │  ┌──────┐  ┌──────┐     ┌──────┐      ┌──────────┐  ┌──────────┐              │
+  │  │ LIS  │  │ MIS  │ ... │ 麻醉  │      │ 傳呼閘道  │  │ WEB EMR  │  ← 對方系統   │
+  │  │ 測試 │  │ 測試 │     │ 測試  │      │ (實機/    │  │ 測試     │    測試實例   │
+  │  │ 實例 │  │ 實例 │     │ 實例  │      │  stub)   │  │ 實例     │    (原廠提供) │
+  │  └──────┘  └──────┘     └──────┘      └──────────┘  └──────────┘              │
+  │                                                                               │
+  │  ┌─────────────────────────────────────────────────────────────┐              │
+  │  │ 我們的測試工具                                                 │              │
+  │  │  · HL7/HTTP 模擬器 (stub)：對方缺席時用錄下的訊息回放            │              │
+  │  │  · 訊息錄製／比對：舊 VB.Net HIS vs 新 C# HIS 送出的內容 diff     │              │
+  │  │  · 測試病患資料集（去識別化）+ 測試案例（M01 測試步驟工作書）      │              │
+  │  │  · 介接卡 ×26：方向、機制、觸發點、欄位、錯誤處理、負責人、狀態   │              │
+  │  └─────────────────────────────────────────────────────────────┘              │
+  └───────────────────────────────────────────────────────────────────────────────┘
+        │ VPN／專線（外部）                    │ 網路（院內）
+        ▼                                     ▼
+  部立台南醫院 · 郭綜合醫院 · 疾管署 NIIS      風采透析（廠商系統）· 傳呼機 · 白板顯示器
+  </pre>
+
+  <h3>26 系統介接目錄（推測，待院方介接說明修正）</h3>
+  <p>「方向」「機制」欄是依一般台灣醫學中心常見做法的<strong>推測</strong>，規格未載明，全部需確認。風險評等考慮：資料量、對就醫流程影響、對方是否為院外機構或商業原廠、法規牽涉。</p>
+
+  <h4>A. 臨床作業</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>19</td><td><strong>LIS</strong></td><td>檢驗資訊系統：醫囑、採檢、結果、危急值</td><td>雙向</td><td>HL7 v2 ORM/ORU 或 DB 交換表；危急值可能另走傳呼</td><td>門診／急診／住院醫囑、臨床護理、住院健檢</td><td>LIS 測試實例＋LIS 原廠、檢驗醫學部；全部檢驗項目碼對照</td><td><strong>極高</strong></td></tr>
+      <tr><td>27</td><td>檢查報告系統</td><td>內視鏡、超音波、心電圖等非影像檢查報告</td><td>雙向</td><td>DB view／HTTP；報告回寫 HIS 或 EMR 索引</td><td>全院排程、醫囑、病歷</td><td>測試實例、各檢查科室代表</td><td>高</td></tr>
+      <tr><td>24</td><td>麻醉管理系統</td><td>術前評估、麻醉紀錄、術後追蹤</td><td>雙向</td><td>HIS 手術排程→麻醉；麻醉紀錄→EMR；DB 或 HL7</td><td>手術麻醉系統（住院）、電子病歷</td><td>測試實例、麻醉部、原廠</td><td>高</td></tr>
+      <tr><td>17</td><td>人體器官保存庫系統</td><td>組織／器官／細胞庫存管理（附錄三大分類均列為 HIS 子系統）</td><td>雙向</td><td>可能是 HIS 內模組對外部庫存系統的 DB 介接</td><td>門診／急診／住院共用</td><td>先確認是否為 T01 內部模組而非外部系統</td><td>中</td></tr>
+      <tr><td>18</td><td>院內感染控制系統</td><td>感染監測、隔離、抗生素管控（附錄共用分類亦列）</td><td>雙向</td><td>LIS 培養結果、住院動態→感控；隔離註記→HIS</td><td>共用、住院醫囑、護理</td><td>感控中心、測試實例</td><td>中</td></tr>
+      <tr><td>33</td><td><strong>風采透析系統</strong></td><td>商業洗腎透析管理系統（風采資訊）；HIS 另有血液透析／腹膜透析作業子系統</td><td>雙向</td><td>病患、醫囑、檢驗→透析系統；透析紀錄、耗材、批價→HIS；廠商私有格式</td><td>血液透析作業、腹膜透析、批價、健保申報</td><td>風采原廠、腎臟科；健保透析申報比對</td><td>高（原廠黑盒）</td></tr>
+      <tr><td>28</td><td>AI 模組</td><td>規格未載明是哪個 AI（影像判讀？敗血症預警？語音病歷？）</td><td>不明</td><td>推測 REST API 或 DB 觸發</td><td>不明</td><td>先要清單</td><td>不明</td></tr>
+      <tr><td>29</td><td>SDM</td><td>醫病共享決策（Shared Decision Making）輔助工具</td><td>HIS→SDM，完成紀錄回寫</td><td>URL 帶病患 context／SSO；回寫 DB 或 API</td><td>門診醫囑、病歷</td><td>SDM 系統負責單位</td><td>低</td></tr>
+      <tr><td>13</td><td>傳呼</td><td>院內呼叫（呼叫器／簡訊／APP）：會診、危急值、急診通知</td><td>HIS→傳呼</td><td>傳呼閘道 API、資料表輪詢或序列埠 modem</td><td>會診、急診、LIS 危急值</td><td>傳呼閘道測試機或實機＋呼叫器；<strong>硬體</strong></td><td>中</td></tr>
+    </tbody>
+  </table>
+
+  <h4>B. 藥品安全／通報</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>12</td><td>ADR 通報</td><td>藥物不良反應院內通報（後續轉全國通報系統）</td><td>雙向</td><td>HIS 病患／用藥→通報表單；過敏／ADR 註記回寫藥歷</td><td>藥局、醫囑、病患就醫資訊整合</td><td>藥劑部、通報系統負責人</td><td>中</td></tr>
+      <tr><td>30</td><td>Epinet 針扎／血體液曝觸</td><td>員工針扎與曝觸事件通報（EPINet）</td><td>HIS→Epinet</td><td>來源病患 HBV/HCV/HIV 檢驗結果查詢；DB view 或 API</td><td>LIS 結果、員工資料</td><td>感控／勞安室；<strong>個資敏感</strong></td><td>中低</td></tr>
+      <tr><td>32</td><td><strong>NIIS 系統相關程式</strong></td><td>疾管署「全國預防接種資訊管理系統」；院內疫苗接種資料上傳與接種紀錄查詢</td><td>雙向（院外）</td><td>疾管署規定之批次檔上傳／Web Service，需憑證</td><td>門診醫囑、疫苗庫存</td><td>疾管署測試環境與憑證、老醫醫事機構代碼</td><td>高（院外、格式由主管機關定）</td></tr>
+    </tbody>
+  </table>
+
+  <h4>C. 病歷／文件／品質</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>21</td><td><strong>WEB EMR</strong></td><td>Web 病歷瀏覽（整合檢驗、影像、病歷文件）</td><td>EMR 讀 HIS；HIS 啟動 EMR</td><td>大量 DB view 直讀、URL/SSO 帶 context</td><td>幾乎全部</td><td>EMR 測試實例；<strong>schema 一動就壞</strong></td><td>極高</td></tr>
+      <tr><td>25</td><td>電子病歷管理系統</td><td>電子病歷製作、簽章（HCA／醫事人員卡）、封存、交換（EEC）</td><td>HIS→EMR 管理</td><td>HIS 產生文件 XML/PDF→簽章佇列；狀態回寫</td><td>病歷管理、出院病摘、各類紀錄</td><td>簽章測試卡、EMR 原廠；法規（電子病歷製作及管理辦法）</td><td>高</td></tr>
+      <tr><td>23</td><td>表單系統</td><td>電子表單／同意書（附錄急診列「電子表單」）</td><td>雙向</td><td>HIS 帶 context 啟動表單；完成狀態與 PDF 回寫</td><td>急診、住院、手術同意</td><td>表單原廠、測試實例</td><td>中</td></tr>
+      <tr><td>14</td><td>疾病分類輔助系統</td><td>ICD-10-CM/PCS 編碼輔助（DRG 申報）</td><td>雙向</td><td>出院病摘→輔助系統；建議碼→HIS 疾病分類系統</td><td>疾病分類系統、住院健保</td><td>疾病分類室、原廠</td><td>中</td></tr>
+      <tr><td>15</td><td>病歷分類輔助系統</td><td>病歷文件分類／掃描歸檔輔助</td><td>雙向</td><td>DB 或檔案</td><td>病歷管理系統</td><td>病歷室</td><td>中低</td></tr>
+      <tr><td>16</td><td>病歷品質審查系統</td><td>病歷審查（評鑑、同儕審查）抽樣與評分</td><td>HIS→審查</td><td>DB view 或批次匯出</td><td>病歷系統</td><td>醫品部／病歷室</td><td>低</td></tr>
+      <tr><td>26</td><td>電子白板系統</td><td>病房／急診／手術室大螢幕看板</td><td>HIS→白板</td><td>DB view 輪詢或推播 API；顯示器由原廠管理</td><td>床位、急診、手術排程、叫號</td><td>白板原廠、一面測試螢幕；<strong>硬體</strong></td><td>中</td></tr>
+    </tbody>
+  </table>
+
+  <h4>D. 行政／管理</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>20</td><td><strong>MIS</strong></td><td>管理資訊／ERP：人事、會計、庫存、採購</td><td>雙向</td><td>MIS→HIS 人員／科室／藥品衛材主檔；HIS→MIS 收入、批價、庫存異動；DB 交換表或批次</td><td>批價、藥局、統計報表、認證授權</td><td>MIS 原廠、會計室、藥劑部；月結比對</td><td>高</td></tr>
+      <tr><td>11</td><td>住院醫師排班系統</td><td>住院醫師／值班排班</td><td>排班→HIS</td><td>DB view：值班醫師、代理醫囑權限</td><td>住院醫囑、醫師人員作業、認證授權</td><td>教學部／排班系統負責人</td><td>低</td></tr>
+      <tr><td>22</td><td>個管系統</td><td>個案管理（癌症、慢性病、出院準備；附錄門診／住院均有「個案管理」子系統）</td><td>雙向</td><td>可能部分為 HIS 內模組、部分為外部平台</td><td>個案管理、腫瘤中心</td><td>先釐清內外邊界</td><td>中</td></tr>
+    </tbody>
+  </table>
+
+  <h4>E. 外部機構／跨院</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>31</td><td><strong>跨院介接：衛福部台南醫院、郭綜合醫院</strong></td><td>成大與兩家合作醫院的既有介接（推測：轉診／代檢／病理或檢驗委託、病歷摘要交換）</td><td>雙向（院外）</td><td>VPN／專線＋檔案或 Web Service；各家不同</td><td>轉介櫃檯、轉檢代檢（T14）、LIS</td><td>兩院資訊室與其 HIS 廠商、VPN 設定、MOU 是否涵蓋老醫</td><td><strong>極高</strong>（三方協調）</td></tr>
+      <tr><td>32</td><td>NIIS（疾管署）</td><td>見 B 組</td><td>雙向（院外）</td><td>主管機關規格</td><td>—</td><td>—</td><td>高</td></tr>
+      <tr><td>33</td><td>風采透析</td><td>見 A 組；商業原廠</td><td>雙向</td><td>原廠私有</td><td>—</td><td>—</td><td>高</td></tr>
+    </tbody>
+  </table>
+
+  <h4>F. 住院健檢（與 H09 同流程）</h4>
+  <table>
+    <thead><tr><th>#</th><th>系統</th><th>是什麼</th><th>方向</th><th>可能機制</th><th>觸及 HIS 子系統</th><th>測試需要</th><th>風險</th></tr></thead>
+    <tbody>
+      <tr><td>34</td><td>住院健檢身心狀況自評表</td><td>受檢者自填問卷（平板／Web）</td><td>問卷→HIS</td><td>Web 表單寫入健檢結果表或 API</td><td>住院健檢系統</td><td>健檢中心、問卷系統負責人</td><td>低</td></tr>
+      <tr><td>35</td><td>住院健檢營養評估表</td><td>營養師評估表</td><td>雙向</td><td>同上</td><td>住院健檢、營養供膳</td><td>營養部</td><td>低</td></tr>
+      <tr><td>36</td><td>住院健檢營養訂餐</td><td>健檢餐訂餐；可能即營養供膳系統的一段</td><td>雙向</td><td>DB</td><td>營養供膳系統（與 T13 跨院供膳統計重疊）</td><td>營養部</td><td>低</td></tr>
+    </tbody>
+  </table>
+
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>介接卡 ×26</strong>：每條介接一份一頁文件——對方系統、負責單位與原廠窗口、合約狀態、方向、機制、觸發時點、欄位對照、錯誤與重送、測試實例位置、測試案例、狀態。這是 M01「測試步驟工作書」的附件，也是 Phase 3 三院上線前檢核清單的來源。</li>
+    <li><strong>測試環境</strong>：T15 的「另一組對應環境」必須包含<em>對方系統的測試實例</em>（LIS 測試、MIS 測試、EMR 測試……），而不只是 HIS 自己的一套。院內系統多半有測試機，但院外（台南醫院、郭綜合、疾管署）與商業原廠（風采）未必。</li>
+    <li><strong>錄製／回放與 diff</strong>：在成大現行 VB.Net HIS 上錄下每條介接實際送出／收到的訊息（HL7、SQL 寫入內容、HTTP payload），改寫後的 C# 版用同樣輸入跑一次做 diff。這是把「26 個黑盒子」變成可自動回歸的關鍵，也是對方原廠不在場時唯一能做的事。</li>
+    <li><strong>Stub／模擬器</strong>：對 HL7 與 HTTP 型介接寫簡單的接收端模擬器，回放錄下的回應；DB 交換表型直接用測試 DB。傳呼與白板做 stub 只能驗訊息，最終仍要實機。</li>
+    <li><strong>院區情境 ×3</strong>：每條介接在老醫／成大／斗六三個院區參數下各跑一次（T02），因為對方系統可能三院共用一套（要帶院區代碼）也可能各自一套（要三組連線設定）。</li>
+  </ul>
+
+  <h3>工作量怎麼估的</h3>
+  <p>每條介接平均：釐清與介接卡 3 人日、測試案例與資料 3 人日、環境協調與執行 5 人日、缺陷修正 4 人日、複測與三院區情境 3 人日 ≈ 18 人日；26 條 ≈ 470 人日。加上錄製／回放工具與 stub 約 40 人日、Phase 3 回歸約 30 人日，合計約 540 人日 ≈ <strong>24 人月</strong>。這個數字很大是因為每一條介接的瓶頸都在<em>等別人</em>：等對方原廠、等測試實例、等院外 VPN；工程人力其實不到一半，其餘是 PM 與協調。LIS、WEB EMR、MIS、跨院介接四條會佔掉三分之一以上。若院方能證明多數介接只是 DB view 直讀且 T01 保持 schema 不變，可降到 15 人月；若 T01 改寫動了 schema，WEB EMR 一條就可能吃掉 3 人月。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>HL7 v2 與台灣醫院慣例</strong>：LIS、檢查報告、麻醉常走 HL7 ORM/ORU/ADT over MLLP，但每家的 Z-segment 與欄位用法都不同；要能讀 HL7 訊息、做欄位對照。</li>
+    <li><strong>健保與主管機關申報鏈</strong>：MIS 收入、透析申報、DRG 編碼（#14）、NIIS 疫苗、電子病歷簽章法規——測試不只驗「訊息有送到」，還要驗下游申報結果一致。</li>
+    <li><strong>DB 直讀介接的隱性契約</strong>：WEB EMR、白板、排班這類多半直接讀 HIS 資料表／view；T01 改寫若改欄位型別、資料表分割，對方在沒人知會下就壞。要先盤點誰在讀哪些 view（DB 端的 DMV／稽核可幫忙）。</li>
+    <li><strong>跨機構協調</strong>：台南醫院、郭綜合有自己的 HIS 廠商與資安規定；疾管署有憑證與機構代碼；老醫作為新機構要重新申請。這是行政流程，不是程式。</li>
+    <li><strong>臨床流程理解</strong>：要設計有意義的測試案例（例：急診檢傷→抽血→危急值→傳呼→醫囑調整→白板更新），需要懂完整就醫流程，才能做端到端情境測試而非逐條點測。</li>
+    <li><strong>個資與測試資料</strong>：伍-一 個資條款下不能拿正式病患資料到測試環境；需要去識別化資料集，且跨院外測試更嚴。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 26 條介接的 HIS 端程式都在改寫範圍；改寫未完成無從測。但介接盤點與介接卡應在 T01 早期就做，否則改寫時不知道哪些 view／表被外部依賴。</li>
+    <li><a href="./T15.html">T15</a> — 測試環境（含對方系統測試實例、跨系統與外部機構連線設定）由 DC 組與 HIS 組建置；沒有環境等於沒有本任務。</li>
+    <li><a href="./M01.html">M01</a> — 測試步驟工作書是本任務的正式載體；介接卡與測試案例格式須先在 M01 訂定。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./H09.html">H09</a> — #34–#36 與儀器介接共用住院健檢流程，需一起做整合測試。</li>
+    <li><a href="./T13.html">T13</a> — 跨院供膳訂餐統計依賴 #36 營養訂餐介接正確。</li>
+    <li><a href="./T06.html">T06</a> — Phase 1 斗六／成大上線前，同一批介接在 C# 新版上必須先通過（雖規格把本任務放在 Phase 2，實際上 Phase 1 上線就會踩到）。</li>
+    <li><a href="./T16.html">T16</a> — 老醫上線與回饋成大／斗六的前置檢核。</li>
+  </ul>
+  <div class="callout">
+    <strong>時程矛盾要提出：</strong>規格把本任務歸在 Phase 2（老醫），但 T06 在 Phase 1（300 天內）就要讓改寫後的 HIS 在斗六與成大上線——屆時 LIS、MIS、WEB EMR 等介接必須已經在新版上驗過。實際上 X01 至少一半的工作要提前到 Phase 1。
+  </div>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>大部分是純軟體系統，但兩條介接的驗證終點是實體設備，且三條介接對象在院外（不是設備，但同樣「不在我們手上」）。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>#13 傳呼（呼叫器／簡訊閘道）</td><td>閘道 API、資料表輪詢、或序列埠 TAP/modem</td><td>傳呼系統原廠；資訊室</td><td>測試閘道或實機＋一支測試呼叫器；老醫是否沿用同一套傳呼</td></tr>
+      <tr><td>#26 電子白板顯示器</td><td>白板伺服器讀 HIS view／API；顯示器由白板系統驅動</td><td>白板原廠</td><td>白板測試伺服器＋一面螢幕；老醫病房數與白板配置</td></tr>
+      <tr><td>#31 台南醫院、郭綜合醫院</td><td>VPN／專線、檔案或 Web Service</td><td>兩院資訊室及其 HIS 廠商</td><td>三方測試時段、老醫端 VPN、資料交換協議涵蓋老醫</td></tr>
+      <tr><td>#32 疾管署 NIIS</td><td>主管機關批次上傳／Web Service，憑證</td><td>疾管署（規格與測試環境）</td><td>老醫機構代碼、測試憑證、測試環境帳號</td></tr>
+      <tr><td>#33 風采透析</td><td>原廠私有格式（DB 或 API）</td><td>風采資訊</td><td>原廠測試實例、老醫是否採購此系統與合約是否含介接</td></tr>
+      <tr><td>#25 電子病歷簽章</td><td>HCA 醫事人員卡、醫療機構卡</td><td>衛福部 HCA、EMR 原廠</td><td>測試用醫事人員卡與讀卡機</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>26 個系統的完整清單：負責單位、原廠／廠商、維護合約狀態（合約是否含介接配合與測試）、現行版本、老醫是否沿用</td><td>資訊室 HIS 組、各系統負責單位</td><td>不知道對方是誰、合約有無義務，就無法排測試；規格未載明原廠須配合，這是<strong>本專案最大阻礙</strong>。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>每個系統的介接文件（介接說明、欄位對照、HL7 訊息規格、交換表 schema）——貳-二-(二) 承諾「本院會請相關單位或廠商提供」</td><td>資訊室 HIS 組向各原廠索取</td><td>沒有文件只能逆向工程 VB.Net 原始碼；文件缺漏的系統要提早列為風險。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>成大現行 HIS 中 26 條介接的原始碼與部署位置（含 DB view、trigger、批次、排程）</td><td>資訊室 HIS 組</td><td>盤點哪些外部系統直讀 HIS 表／view，T01 改寫才知道什麼不能動。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>含對方系統測試實例的測試環境（至少 LIS、MIS、WEB EMR、EMR 管理、麻醉、表單、檢查報告）與網路連通</td><td>資訊室 DC 組、HIS 組、各原廠</td><td>貳-一-(五)-1 只說 HIS 測試環境；對方系統測試實例不一定存在，沒有就只能在正式環境測。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>每個系統一位具名窗口（院方業務單位＋原廠工程師）與可配合測試的時段承諾</td><td>資訊室 HIS 組、專案管理人</td><td>26 個黑盒子沒有人回答問題就停擺；要寫進工作計畫書為院方配合事項。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>#31 與台南醫院、郭綜合的資料交換協議內容、介接規格、VPN 設定；是否需為老醫另簽</td><td>資訊室、醫務秘書室／企劃、兩院資訊室</td><td>跨機構需行政程序，前置期以月計。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>#32 NIIS 介接程式與疾管署規格版本、老醫醫事機構代碼申請進度、測試憑證</td><td>資訊室、感染科／疫苗業務單位、疾管署</td><td>老醫是新機構，代碼與憑證申請不在我們手上。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>去識別化測試病患資料集與測試用醫事人員卡</td><td>資訊室、病歷室、個資窗口</td><td>個資條款禁止用正式資料；沒有資料集測不了端到端。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>#28 AI 模組、#17 器官保存庫、#22 個管、#36 營養訂餐的內外部邊界說明</td><td>資訊室 HIS 組</td><td>可能根本是 HIS 內部模組（T01 範圍）而非外部介接，影響工作量歸屬。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>對方原廠無配合義務（首要阻礙）</strong> — 26 條介接的另一端由各自原廠維護，本案規格對這些原廠沒有任何約束，只承諾院方會「請」他們提供說明。原廠不到場、不開測試環境、要另收費，都會讓該條介接無法驗收；必須在工作計畫書把「原廠配合」列為院方義務，並約定延誤時程不計入我方。</li>
+    <li><strong>「測試」範圍被解讀成「開發」</strong> — 老醫上線時對方系統可能需要新版本或新欄位（院區代碼），院方可能期望我們一併改。邊界不定，工作量可能翻倍。</li>
+    <li><strong>DB 直讀型介接被 T01 改寫弄壞</strong> — WEB EMR、白板、排班等直接讀 HIS 表；改寫時若動 schema，故障會在上線後才被發現。</li>
+    <li><strong>沒有對方系統測試實例</strong> — 只能在正式環境測，等於拿病人資料與正式服務冒險；也違反貳-三-5「模擬新版本運作環境」。</li>
+    <li><strong>跨機構與主管機關前置期</strong> — 台南醫院、郭綜合、疾管署的行政程序（協議、VPN、憑證、機構代碼）動輒數月，且老醫作為新機構要從頭申請。</li>
+    <li><strong>Phase 1 就會踩到</strong> — T06 斗六／成大上線前，LIS、MIS、EMR 介接就必須通過；規格把本任務放 Phase 2 是時程錯置。</li>
+    <li><strong>清單本身可能不完整</strong> — 26 個是規格列的；成大實際介接的系統（如 IC 卡、健保 VPN、雲端病歷、PACS 外的影像系統）不止這些，未列者出問題仍會被要求處理。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>「須測試」的正式定義是什麼？對方系統為老醫需要的調整由誰做、誰付費？</li>
+    <li>26 個系統中哪些三院共用一套（帶院區代碼）、哪些各院一套？老醫會採購哪些（風采透析？電子白板？傳呼？）</li>
+    <li>哪些系統直接讀寫 HIS 資料庫？T01 改寫是否承諾 schema 不變？</li>
+    <li>各原廠維護合約是否含「配合 HIS 改版之介接測試」？若需付費，預算在哪？</li>
+    <li>#31 跨院介接的實際內容是什麼（轉診？代檢？病歷交換？）；老醫是否納入現有協議？</li>
+    <li>#32 NIIS 老醫的醫事機構代碼何時核發？疫苗業務是否在老醫開業初期就有？</li>
+    <li>#28 AI 模組具體是哪些模組、誰開發、介面是什麼？</li>
+    <li>#17、#18、#22 在附錄被列為 HIS 子系統——它們是 T01 改寫對象還是外部系統？</li>
+    <li>測試環境何時可用？是否含各對方系統測試實例？網路是否與外部機構測試環境打通？</li>
+    <li>測試資料集由誰準備、去識別化方式為何？跨院外測試可否用假資料？</li>
+    <li>驗收標準：每條介接需通過多少案例？由誰簽核（使用單位、資訊室、原廠）？</li>
+    <li>Phase 1 斗六／成大上線前需先通過哪些介接？是否需在工作計畫書把 X01 拆成 Phase 1 與 Phase 2 兩段？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

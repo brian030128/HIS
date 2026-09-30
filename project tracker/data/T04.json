@@ -1,0 +1,43 @@
+{
+  "id": "T04",
+  "title": "程式碼資安強化",
+  "phase": 1,
+  "category": "core",
+  "hardware": "no",
+  "domain_difficulty": 3,
+  "tech_difficulty": 4,
+  "effort_pm": 45,
+  "depends_on": ["T01", "M03"],
+  "summary": "以 Roslyn 掃描建立 SQL_CATALOG，把 Client 端所有 SQL 搬到服務端型別化 WCF 契約 + Dapper 參數化資料存取層（沿用既有 SP），Client 零 SQL 零連線字串、DB 帳號改服務端最小權限並記錄存取；WCF 在 IIS 上同時開 HTTP/HTTPS 端點（TLS 1.2+、院方憑證、Client 設定切換），配合 M03 防護等級與弱掃／滲透驗收。",
+  "urgent_asks": [
+    {"what": "完整原始碼（同 T01 P0），特別是 WCF 服務端專案、服務契約、web.config/app.config、所有 stored procedures、DB 帳號與權限設定", "from": "資訊室 HIS 組、資訊室 DC 組", "why": "不知現行 SQL 在哪、怎麼送後端、DB 帳號怎麼給，資料存取層設計與 SQL 搬遷量無從估，T01 的 B/C 級人日也不準", "priority": "P0"},
+    {"what": "架構事實確認：Client 是否直連 DB？是否有泛用 ExecSql 類 WCF 介面？現行 binding、host 方式、有無負載平衡？", "from": "資訊室 HIS 組、資訊室 DC 組", "why": "每個答案都改變 T04 的形狀；有泛用 ExecSql 代表每支程式都要改", "priority": "P0"},
+    {"what": "機關指定的資通系統防護需求等級與評估報告格式；院方既有資安規範（密碼原則、稽核、加密、遠端連線）", "from": "資安承辦、資訊室", "why": "決定控制措施深度；晚拿到即重做設計（同 M03 P0）", "priority": "P1"},
+    {"what": "憑證來源與流程：院內 PKI 或外購？誰簽發、誰更新？Client 端信任如何派送？", "from": "資訊室 DC 組", "why": "憑證到期等於全院停擺；流程需在上線前定好", "priority": "P1"},
+    {"what": "院方弱掃／滲透的工具、頻率、報告格式與歷次報告（含現行系統已知弱點）", "from": "資安承辦", "why": "知道驗收標準才能對準；歷次報告是免費的需求清單", "priority": "P1"},
+    {"what": "院方對資料存取層技術路線（Dapper 參數化 vs 全 SP）與 DBA 立場", "from": "資訊室 HIS 組、DBA", "why": "與院方維運習慣衝突會在技術移轉時翻案", "priority": "P1"},
+    {"what": "Client 端 OS／.NET runtime 版本分布與 GPO 管理能力", "from": "資訊室 DC 組", "why": "決定 TLS 1.2+ 與憑證派送可行性", "priority": "P2"}
+  ],
+  "blockers": [
+    "若現行為泛用 SQL 執行介面，「移至後端」等於為每個作業設計服務方法，數千個方法是 T01 之外最大的隱藏工作量",
+    "動態條件查詢畫面搬到白名單 criteria 模型易漏使用者常用組合",
+    "院方若堅持保留每人 DB 帳號或 Client 直連，資安目標達不到並與 T08 資料流控制衝突",
+    "HTTPS 對效能與舊 Client OS 相容性的影響",
+    "防護需求等級太晚指定，「高」等級的儲存加密與稽核粒度會造成返工",
+    "保固期 OWASP 弱點無償修正是無底洞，取決於 T04 是否做乾淨",
+    "X01 的外部系統若直接讀寫 HIS DB，帳號收緊會弄壞它們"
+  ],
+  "contacts": ["資訊室 HIS 組", "資訊室 DC 組", "資安承辦", "DBA", "外部系統廠商（直連 DB 者）"],
+  "open_questions": [
+    "現行 Client 端 SQL 的形式與送到後端的方式？有無泛用 ExecSql？Client 是否持有連線字串？",
+    "WCF 現行 binding、host、有無負載平衡與反向代理？",
+    "「同時支援 HTTP 和 HTTPS」是過渡能力還是長期並存？上線後可否關閉 HTTP？",
+    "機關指定的防護需求等級為何？報告格式？何時指定？",
+    "憑證由誰簽發與維護？院內有 PKI 嗎？Client 端信任如何派送？",
+    "DB 帳號模型現況？可否改為服務端專用最小權限帳號？",
+    "院方 DBA 對 SP vs 應用層參數化 SQL 的立場？",
+    "哪些外部系統直接讀寫 HIS DB？",
+    "存取紀錄的粒度要求與保存方式？現行有無此機制？",
+    "院方弱掃／滲透的工具與時程？可否整合測試前先自行 SAST/DAST？"
+  ]
+}

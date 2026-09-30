@@ -1,0 +1,42 @@
+{
+  "id": "T08",
+  "title": "數據整合中台",
+  "phase": 2,
+  "category": "platform",
+  "hardware": "no",
+  "domain_difficulty": 3,
+  "tech_difficulty": 5,
+  "effort_pm": 24,
+  "depends_on": ["T02", "T07"],
+  "summary": "以 CDC（或 Replication）＋MQ 把三院核心 HIS 的掛號、床位、排程、手術、檢驗、供膳、健檢歷史即時複寫到唯讀 ODS 與查詢 API，供 T09–T14 跨院查詢，寫入仍回各院 HIS 後端服務；含清檔機制與成大住院健檢歷史銜接。",
+  "urgent_asks": [
+    {"what": "核心 HIS 資料庫引擎、版本、版次、HA 架構、是否已啟用 CDC／Replication", "from": "資訊室 DC 組、HIS 組", "why": "決定擷取技術與授權成本；舊版 SQL Server Standard 無 CDC，Oracle 工具費用完全不同，架構無法定案", "priority": "P0"},
+    {"what": "三院 DB 拓樸（斗六是否共用總院 DB、老醫是否獨立）、跨院網路頻寬延遲與防火牆", "from": "資訊室 DC 組", "why": "共用 DB 與各自獨立的工作量差一倍", "priority": "P0"},
+    {"what": "六個共享資料域的資料字典／ERD、資料量、日增量、狀態碼定義", "from": "資訊室 HIS 組", "why": "沒有資料字典就得逆向 3,647 支程式找表；資料量決定容量規劃", "priority": "P0"},
+    {"what": "中台測試與正式環境（VM、儲存、MQ／DB 授權）於 Phase 2 前 2 個月提供，提前於 T15", "from": "資訊室 DC 組", "why": "規格把環境放在 Phase 3；等到那時 T09–T14 在 Phase 2 無環境可測", "priority": "P0"},
+    {"what": "住院健檢系統資料模型、報告檔位置與格式、歷史資料量", "from": "資訊室 HIS 組、住院健檢單位", "why": "銜接歷史資料的範圍與儲存設計完全取決於此", "priority": "P1"},
+    {"what": "院方既有 DW／BI／ETL 平台與資料流", "from": "資訊室", "why": "避免蓋第二套，可共用 capture 減少 OLTP 負擔", "priority": "P1"},
+    {"what": "各資料域保存年限與清檔規則", "from": "病歷室、資安組、資訊室", "why": "清檔機制是驗收項目，規則由院方訂", "priority": "P1"},
+    {"what": "中台維運分工與納入 M03 防護等級評估的時程", "from": "資訊室 DC 組、資安組", "why": "保固 SLA 緊急 2 小時含中台，分工不清全算我方", "priority": "P2"}
+  ],
+  "blockers": [
+    "來源 DB 引擎、版本、拓樸皆規格未載明，投標估價最大不確定項",
+    "環境依規格放在 Phase 3 T15，中台在 Phase 2 前段就需要",
+    "總院持續增修（T05）造成 schema 漂移，CDC capture instance 需重建",
+    "初始快照對 OLTP 的衝擊，HIS 不能中斷需離峰分批",
+    "中台被誤當寫入路徑造成雙重真相，需架構規範明文禁止",
+    "老醫若為獨立機構，跨院資料流通涉及個資法與 M03 防護等級",
+    "Dashboard／Analytics 範圍解讀，需在 T07 基準文件寫成 Out-of-scope"
+  ],
+  "contacts": ["資訊室 DC 組", "資訊室 HIS 組", "住院健檢單位", "病歷室", "資安組"],
+  "open_questions": [
+    "核心 HIS DB 是否為 SQL Server？版本與版次？是否已有 CDC 或 Replication？",
+    "斗六與總院是否共用 DB？老醫規劃為獨立 DB？",
+    "院方對即時的期望是秒級或分鐘級？是否接受最終一致性？",
+    "可否使用開源 MQ？院方對軟體原產地的審查程序為何？",
+    "住院健檢報告檔格式與位置？是否含影像需與 PACS 連動？",
+    "清檔規則由誰訂？歸檔或刪除？稽核紀錄是否保存 5 年？",
+    "中台上線後由誰維運？SLA 是否涵蓋 MQ 延遲類事件？",
+    "Dashboard／Analytics 是否確定不在本案範圍？"
+  ]
+}

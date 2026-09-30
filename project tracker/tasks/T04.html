@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T04 程式碼資安強化 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · core</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T04</div>
+  <h1>程式碼資安強化</h1>
+  <p class="lede">規格只寫兩句：「SQL 語法移至後端執行」、「WCF 連線同時支援 HTTP 和 HTTPS」。第一句的真正意思是<strong>資料存取層要重新設計</strong>——現行 Client 端極可能自己組 SQL 字串、透過泛用 WCF 介面丟到後端執行，這是 SQL Injection 與資料外洩的根源；第二句意味著憑證、綁定、IIS 設定與 Client 端切換機制。兩者都會被 M03（防護需求等級、弱掃／滲透）與保固條款（新增 OWASP Top 10 弱點無償修正）拿來驗收。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 · 300 天內</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 45 人月（框架與資安；逐支搬 SQL 計入 T01）</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> <a href="./M03.html">M03</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T06.html">T06</a> <a href="./T08.html">T08</a> <a href="./M03.html">M03</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(一)-4、伍-三、參-二-(二)-2</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(一)-4：「提升程式碼的資訊安全：將 SQL 語法移至後端執行；WCF 連線同時支援 HTTP 和 HTTPS。」</p>
+    <p>伍-三-1：「依『資通安全責任等級分級辦法』附表九，機關指定資通系統防護需求等級；依附表十資通系統防護基準，系統設計須符合該等級之控制措施，並依機關指定格式提交完整評估報告。」伍-三-6：「軟體或系統發展須進行版本管理，並依資安規範提供權限控管與存取紀錄保存。」伍-三-7：「配合機關業務需要對資料進行加密。」</p>
+    <p>參-二-(二)-2：「專案期間新增的 SQL Injection、XSS 及其他 OWASP Top 10 弱點……廠商應與本機關研議後依時程無償修正……配合本院弱點掃描及滲透測試。」</p>
+  </blockquote>
+  <p>規格未載明：現行 SQL 在 Client 端的形式（字串拼接？泛用 ExecSql 服務？）、WCF 現行綁定與 host、憑證來源（院內 CA／公開 CA）、防護需求等級（普／中／高）、DB 帳號模型。全部需確認。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>目標是 Client 端<strong>零 SQL</strong>、<strong>零 DB 連線字串</strong>：所有資料存取經由型別化的 WCF 服務契約（每個作業一個方法、參數有型別），服務端用一層資料存取層（Repository + 參數化查詢／stored procedure）對 DB；WCF 同時開 HTTP 與 HTTPS 端點（過渡期），由 Client 設定決定走哪個，最終目標是院內也只走 HTTPS。</p>
+  <pre class="diagram">
+ 現行 (推測)                                  目標
+┌─────────────────────┐                     ┌─────────────────────────────────────┐
+│ Client (VB)         │                     │ Client (C#)                          │
+│  sql = "SELECT …    │                     │  svc.GetPatientOrders(chartNo, date) │
+│   WHERE id='" & x   │                     │  無 SQL、無連線字串、無 DB 帳號        │
+│  svc.ExecSql(sql)   │                     └──────────────┬───────────────────────┘
+└──────────┬──────────┘                                    │ WCF basicHttp / wsHttp
+           │ WCF HTTP 明文                    ┌──────────────▼───────────────────────┐
+┌──────────▼──────────┐                     │ IIS 上的 WCF 服務 (雙端點)            │
+│ WCF ExecSql(string) │                     │  http://his-svc/...  (過渡, 可關閉)   │
+│  → 直接執行         │                     │  https://his-svc/... TLS1.2+ 憑證     │
+└──────────┬──────────┘                     │  Message header: Token + CampusId    │
+           │                                 │  ServiceContract 依子系統分 (T01)     │
+┌──────────▼──────────┐                     ├──────────────────────────────────────┤
+│ SQL Server          │                     │ HIS.Data 資料存取層                   │
+│  Client 直連?       │                     │  IRepository<T> · Dapper 參數化查詢    │
+│  共用高權限帳號?     │                     │  既有 SP 沿用 · 新 SP 只給批次/報表    │
+└─────────────────────┘                     │  DB 連線僅服務端持有 · 最小權限帳號    │
+                                             │  存取紀錄 (誰/何時/查了誰) → 稽核表   │
+                                             └──────────────┬───────────────────────┘
+                                                            ▼
+                                                     SQL Server (schema 不動)
+ 工具鏈：Roslyn 掃描器 → SQL_CATALOG（每段 SQL 的來源程式、型態、參數）→ 逐段搬遷 → analyzer 禁止 Client 出現 SqlCommand/連線字串
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>SQL 盤點工具</strong>：先用 Roslyn 掃描 VB 原始碼，抓所有 SQL 字串（含拼接、常數、資源檔）與 <code>SqlCommand</code>／<code>ExecSql</code> 呼叫，產出 SQL_CATALOG：來源程式、動態程度（純常數／有參數／字串拼接使用者輸入）、所屬子系統。這份清單就是 T04 的工作分解，也是 M03 的證據。預估 3,900 支程式內有 8,000–15,000 段 SQL。</li>
+    <li><strong>資料存取層決策：Dapper + 參數化 SQL 為主，stored procedure 為輔，不用 EF。</strong>理由：(1) 15 年的 schema 沒有 ORM 友善的結構，EF 對照會變成另一個專案；(2) 搬遷的本質是「把同一段 SQL 加上參數、移到服務端」，Dapper 讓這件事幾乎機械化，轉換工具可以半自動產生 Repository 方法；(3) 現有 SP 直接沿用；新 SP 留給批次、報表、大量資料處理。「全部改 SP」在 300 天內不可行且會把邏輯鎖進 DB。這個決策<strong>要跟院方 HIS 組確認</strong>——如果他們的維運習慣是 SP 優先，要提早知道。</li>
+    <li><strong>動態 SQL 的處理</strong>：查詢畫面常見「使用者勾哪幾個條件就拼哪幾段 WHERE」。做法是服務端的查詢條件物件（criteria DTO）+ 白名單欄位 + 參數化拼接；絕不接受 Client 傳來的 SQL 片段或欄位名稱字串。這類程式是搬遷最花時間的一群，佔 SQL 段落的 10–20%。</li>
+    <li><strong>WCF HTTP + HTTPS</strong>：同一服務在 IIS 上綁兩個端點，HTTPS 用 Transport security（basicHttpBinding／wsHttpBinding + TLS 1.2 以上）；憑證由院內 PKI 或院方指定 CA 簽發、綁在 IIS 站台，Client 端 <code>app.config</code> 決定 endpoint（T02 的設定機制），並用 Windows 憑證存放區驗證。要處理：憑證更新流程（到期就是全院停擺）、Client 舊 OS 的 TLS 支援、負載平衡器上的 TLS 終結、WCF 訊息大小與逾時在 HTTPS 下的差異。HTTP 端點只在過渡期存在，上線後應可由設定關閉；規格說「同時支援」，我們解讀為能力而非常態，需確認。</li>
+    <li><strong>認證與授權</strong>：Client 登入後拿 token（取代 T02 規格字面的「pwd」），每次呼叫帶在 message header；服務端驗 token、解 CampusContext、記錄存取（伍-三-6 的存取紀錄保存）。DB 帳號改為服務端專用、最小權限，Client 端不再持有任何 DB 帳號——這可能與現行「每人一組 DB 帳號」或「共用帳號寫在設定檔」的模式衝突，是要跟院方談的架構變更。</li>
+    <li><strong>與 M03 的分工</strong>：M03 負責防護需求等級評估報告、安全設計檢核表、弱掃／滲透的配合與文件；T04 負責做出讓那些檢核能過的程式碼。等級（普／中／高）決定 T04 要做到哪裡：例如「高」會要求傳輸與儲存加密、更細的稽核、密碼原則——所以 T04 依賴 M03 的等級評估先出來。</li>
+    <li><strong>驗證</strong>：analyzer 在 build 階段禁止 Client 專案參照 System.Data.SqlClient／含連線字串；靜態原始碼掃描（SAST）+ 院方弱掃／滲透；HTTP 端點關閉後的全功能回歸。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>T04 自身：SQL 盤點工具與 SQL_CATALOG 約 3 人月；資料存取層框架（Repository、Dapper 慣例、交易、稽核、連線管理）約 6 人月；WCF 雙端點、憑證流程、token 認證與 header、Client 設定切換約 6 人月；動態查詢框架（criteria DTO + 白名單）約 4 人月；DB 帳號模型改造與權限盤點約 4 人月；SAST 導入、弱掃／滲透修復兩輪、安全設計檢核佐證（配合 M03）約 10 人月；回歸與 HTTPS 效能驗證約 4 人月；緩衝與文件約 8 人月。合計約 45 人月。</p>
+  <p><strong>逐支程式搬 SQL 不在這 45 人月內</strong>：若 SQL 段落 10,000 段、平均 0.3 人日（含動態查詢的 1–2 人日），約 3,000 人日 ≈ 140 人月——這是 T01 每支程式人日估算裡 B／C 級的主要成分，已包含在 T01 的 300 人月中。這樣分才不會重複計算，但也代表 T01 的估算對「SQL 段落數與動態程度」極度敏感，SQL_CATALOG 要在 Pilot 階段就做出來。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>資通安全責任等級分級辦法 附表十</strong>：各防護等級對存取控制、稽核與可歸責性、系統與通訊保護（傳輸加密）、系統與資訊完整性的具體控制措施。要能把每條對映到程式碼證據。</li>
+    <li><strong>WCF 安全模型</strong>：Transport vs Message security、憑證驗證鏈、IIS 綁定與 SNI、Windows 驗證與 token 的取捨；以及 WCF 在 .NET Framework 與 CoreWCF 上的差異（與 T01 的 .NET 版本決策連動）。</li>
+    <li><strong>SQL Server 權限與稽核</strong>：最小權限帳號、應用程式角色、SQL Audit；DB 端也可以擋住 Client 直連（防火牆只允許服務主機）。</li>
+    <li><strong>醫療資料存取的合規</strong>：個資法與醫療法對「誰查了誰的病歷」的稽核要求（伍-一-5、伍-三-6），存取紀錄的粒度與保存 5 年（伍-一-8）會影響稽核表的設計與容量。</li>
+    <li><strong>難點</strong>：泛用 ExecSql 介面若存在，等於現行系統的「API」就是 SQL 本身，每一支程式都要改；動態查詢畫面的搬遷需要理解業務上的查詢意圖，不是機械工作；HTTPS 上線牽涉全院 Client 端憑證信任，是營運變更不是程式變更。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 資料存取層與 WCF 契約的<strong>介面</strong>在 T01 量產前凍結（設計 gate，約第 6–8 週），但逐支程式搬 SQL 是隨 T01 轉換一起做的，T04 的完成度跟著 T01 進度走。</li>
+    <li><a href="./M03.html">M03</a> — 機關指定的防護需求等級（伍-三-1）決定 T04 要做到的控制措施深度（加密、稽核粒度、密碼原則）。等級未定就只能按「中」設計並承擔改設計風險。</li>
+    <li>（非正式）<a href="./T02.html">T02</a> — token／CampusId 走 T02 的 Context 與設定機制；endpoint 切換是 T02 的設定項。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T06.html">T06</a> — 斗六／成大上線前，院方弱掃／滲透必須通過；HTTPS 憑證與 Client 端信任要部署到全院。</li>
+    <li><a href="./T08.html">T08</a> — 數據整合中台的 CDC／讀寫分離依賴「所有寫入都經服務端資料存取層」；Client 直連 DB 的話中台無法保證資料流可控。</li>
+    <li><a href="./M03.html">M03</a> — 安全設計檢核表、安全檢測證明的佐證來自 T04 的實作。</li>
+    <li><a href="./M04.html">M04</a> — 保固期 OWASP 弱點無償修正的暴露面，取決於 T04 做得多乾淨。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無設備介接。但 HTTPS 涉及基礎設施：憑證（院內 CA 或採購）、負載平衡器／反向代理的 TLS 設定、Client 端作業系統的 TLS 版本與憑證信任派送（GPO），這些由資訊室 DC 組負責，我們要提供需求規格。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>憑證與 PKI（院內 CA 或公開 CA）</td><td>X.509、TLS 1.2+</td><td>資訊室 DC 組／資安承辦</td><td>測試環境憑證、更新演練</td></tr>
+      <tr><td>負載平衡器／反向代理（若有）</td><td>TLS 終結或透傳</td><td>資訊室 DC 組</td><td>測試環境同構</td></tr>
+      <tr><td>Client 端電腦（全院）</td><td>OS TLS 支援、憑證信任（GPO 派送）</td><td>資訊室 DC 組</td><td>各型號／OS 版本 Client 抽樣測試</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>完整原始碼（同 T01 P0），特別是 <strong>WCF 服務端專案、服務契約、web.config／app.config、所有 stored procedures、DB 帳號與權限設定</strong></td><td>資訊室 HIS 組、DC 組</td><td>不知道現行 SQL 在哪、怎麼送到後端、DB 帳號怎麼給，資料存取層設計與 SQL 搬遷工作量無從估；T01 的 B／C 級人日也跟著不準。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>現行架構事實確認：Client 是否直連 DB？是否有泛用 ExecSql 類的 WCF 介面？WCF 現行 binding、host 方式、有無負載平衡？</td><td>資訊室 HIS 組、DC 組</td><td>三個答案各自改變 T04 的形狀；「有泛用 ExecSql」代表每支程式都要改。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>機關指定的資通系統<strong>防護需求等級</strong>與指定的評估報告格式（伍-三-1）；院方既有資安規範文件（密碼原則、稽核要求、加密要求、遠端連線規範）</td><td>資安承辦、資訊室</td><td>決定控制措施深度；晚拿到就是重做設計。這同時是 M03 的 P0。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>憑證來源與流程：院內 PKI 還是外購？誰簽發、誰負責更新？Client 端信任如何派送？</td><td>資訊室 DC 組</td><td>HTTPS 不是程式問題是營運問題；憑證到期 = 全院停擺，流程要在上線前定好。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方弱掃／滲透測試的工具、頻率、報告格式與歷次報告（含現行系統的已知弱點）</td><td>資安承辦</td><td>知道驗收標準才能對準；歷次報告是免費的需求清單。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方對資料存取層技術路線的意見：Dapper 參數化 vs 全 SP？DBA 是否要求所有存取走 SP？</td><td>資訊室 HIS 組、DBA</td><td>與院方維運習慣衝突會在技術移轉（M02）時翻案；要提早定。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>Client 端電腦的 OS／.NET runtime 版本分布，與 GPO 管理能力</td><td>資訊室 DC 組</td><td>決定 TLS 與憑證派送可行性；舊 OS 可能撐不了 TLS 1.2+。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>泛用 SQL 執行介面</strong> — 若現行架構是 Client 組 SQL、後端照跑，「移至後端」等於為每個作業設計一個服務方法，數千個方法要命名、定契約、寫、測；這是 T01 之外最大的隱藏工作量，也是為什麼 SQL_CATALOG 要在 Pilot 時就做。</li>
+    <li><strong>動態查詢畫面</strong> — 條件組合式查詢搬到白名單 criteria 模型時，容易漏掉某個使用者常用的組合；需要使用單位參與測試。</li>
+    <li><strong>DB 帳號模型變更被拒</strong> — 若院方堅持保留每人 DB 帳號或 Client 直連（例如給報表工具用），資安目標達不到，且與 T08 的資料流控制衝突。要提早談成。</li>
+    <li><strong>HTTPS 對效能與相容性的影響</strong> — 加密後 WCF 回應變慢、舊 Client OS 握手失敗、負載平衡器設定錯誤；需要在 T03 的效能基準上比較 HTTP／HTTPS 差異。</li>
+    <li><strong>防護等級太晚指定</strong> — 「高」等級的儲存加密、稽核粒度會反過來影響 schema 與資料存取層；Phase 1 後期才知道就是返工。</li>
+    <li><strong>保固期無限責任</strong> — 參-二-(二)-2 把「專案期間新增的 OWASP 弱點」修正責任放在廠商，且驗收前後院方會做弱掃／滲透；T04 做不乾淨，M04 保固期就是無底洞。</li>
+    <li><strong>與 X01 外部系統的相容</strong> — 若 26 個外部系統中有直接讀寫 HIS DB 的（很可能），T04 的帳號收緊會弄壞它們；需要盤點誰在直連。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>現行 Client 端 SQL 的形式與送到後端的方式？有無泛用 ExecSql 服務？Client 是否持有 DB 連線字串？</li>
+    <li>WCF 現行 binding（basicHttp／wsHttp／netTcp）、host（IIS／Windows Service）、有無負載平衡與反向代理？</li>
+    <li>「同時支援 HTTP 和 HTTPS」是過渡期能力，還是院方要長期並存？上線後可否關閉 HTTP？</li>
+    <li>機關指定的防護需求等級為何？評估報告格式？何時指定？</li>
+    <li>憑證由誰簽發與維護？院內有 PKI 嗎？Client 端憑證信任如何派送？</li>
+    <li>DB 帳號模型現況（每人一組／共用／Windows 驗證）？院方能否接受改為服務端專用最小權限帳號？</li>
+    <li>院方 DBA 對 stored procedure vs 應用層參數化 SQL 的立場？</li>
+    <li>哪些外部系統（X01 清單）直接讀寫 HIS DB？帳號收緊會影響誰？</li>
+    <li>存取紀錄（誰查了誰的病歷）的粒度要求與保存方式？現行有無此機制？</li>
+    <li>院方弱掃／滲透的工具與時程？我們可否在整合測試前先自行掃描（SAST／DAST）並提交報告？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

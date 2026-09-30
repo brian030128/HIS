@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T05 開發期間與總院增修保持同步 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 1 · core（實際上貫穿全程 630 天）</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T05</div>
+  <h1>開發期間與總院增修保持同步</h1>
+  <p class="lede">我們改寫的是一個「會動的目標」：在 630 天內，總院 HIS 組仍會依健保署公告與院內單位需求持續改 VB.Net 正式版。若沒有一套固定節奏的變更接收、登錄、移植、回歸機制，Phase-1 上線那天的 C# 版就會比 VB.Net 正式版少掉幾個月的功能，等於上線即倒退。規格只說「必須定期同步」，完全沒給機制，所以這個任務的本質是<strong>對院方團隊的流程依賴</strong>，要在工作計畫書（20 天內）就把規則訂死。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 1 起、持續至 630 天</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d4"></span> 4/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 36 人月（常駐 2 人 × 18 個月）</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T01.html">T01</a> <a href="./M01.html">M01</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T06.html">T06</a> <a href="./T16.html">T16</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">壹-四-5、貳-一-(四)、貳-三-4、貳-三-6</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>壹-四-5：「開發期間須同時定期更新總院持續增修的功能，以達到統一的版本。」</p>
+    <p>貳-一-(四)：「本案開發期程長，期間總院 HIS 仍須持續配合健保署及院內各使用單位需求進行增修，因此必須定期將線上新增調整的功能同步到本系統，確保程式及功能一致。」</p>
+    <p>貳-三-4：「HIS 服務不能中斷，需求調整亦需持續上版，得標廠商必須提供規劃以確保新舊版本功能一致。」</p>
+    <p>貳-三-6：「對設備規格、功能、專案時程或施工作業的任何變更，需與資訊室及專案管理人協商取得許可後方可進行。」</p>
+  </blockquote>
+  <p>注意規格用詞是「定期」「提供規劃」——沒有定義頻率、沒有定義院方提供變更資訊的方式、沒有說變更誰付費。這些空白全部要在工作計畫書裡由我們填上並請院方簽認。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>同步分兩個時期，機制不同。<strong>時期 A（第 0–300 天）</strong>：總院正式版是 VB.Net，我們的 C# 版還沒上線，變更方向是 VB.Net → C#，靠人工移植。<strong>時期 B（第 300–630 天）</strong>：成醫與斗六已切到 C#，總院的增修必須直接做在 C# 主線上（不論由院方或我們做），我們的老醫功能分支要定期從主線 merge，變更方向變成 Git 分支合併（分支模型見 <a href="./T16.html">T16</a>）。</p>
+  <pre class="diagram">
+時期 A（Day 0–300）VB.Net → C# 人工移植
+
+  院方 HIS 組（VB.Net 正式版）                    本案同步小組（C# 新系統）
+  ┌────────────────────┐  ①上版單 / release note  ┌────────────────────┐
+  │ VB.Net 版本庫       │ ───────────────────────▶ │ 變更登錄簿          │
+  │（TFS? SVN? 未確認）  │  ②repo diff（每兩週拉）  │ Change Register    │
+  └─────────┬──────────┘                          └─────────┬──────────┘
+            │ ③DDL / PUB_Config / 檢核規則異動                │ triage：已改寫模組→立即移植
+            ▼                                                │         未改寫模組→記到基準快照
+  ┌────────────────────┐        同一顆 DB          ┌─────────▼──────────┐
+  │ 共用 HIS DB         │◀════════════════════════▶│ C# 移植（依 T01 新架構）│
+  │（成醫 + 斗六）       │                          └─────────┬──────────┘
+  └────────────────────┘                                     ▼
+                                                   ┌────────────────────┐
+                                                   │ 回歸測試            │
+                                                   │ ・自動化單元/整合測試 │
+                                                   │ ・VB vs C# golden   │
+                                                   │   output 比對       │
+                                                   └─────────┬──────────┘
+                                                             ▼
+                                                   merge → develop → 雙週 build
+  凍結窗（上線前 T-30 天）：院方只上健保強制與緊急修正，且雙版同時上（dual-ship）
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>變更接收（intake）</strong>：三個來源缺一不可。① 院方每次上版的「上版單／變更單」（他們一定有某種上版流程，格式未確認）；② 我們直接對院方 VB.Net 版本庫做 diff（需唯讀帳號）；③ DB 端異動——DDL、PUB_Config／PCS_Ip_Config 之類設定表、檢核規則表。第三種最危險，因為 C# 與 VB.Net 共用同一顆 DB，院方改欄位當天我們的測試環境就可能壞掉，卻不會出現在任何程式碼 diff 裡。</li>
+    <li><strong>變更登錄簿（Change Register）</strong>：一張表，每筆一個院方變更：院方單號、上版日、子系統、VB 程式名、DB 物件、原因分類（健保署／使用單位／bug／資安）、影響院區（成醫／斗六／未來老醫）、對應 C# 模組、狀態（待分析／移植中／已合併／已回歸／延後）、負責人、驗證方式。這張表就是日後「新舊版本功能一致」（貳-三-4）的證據，驗收時會被要。</li>
+    <li><strong>節奏</strong>：雙週同步批次。週一拉 diff 與上版單 → 週二 triage 會議（我們 + 院方 HIS 組窗口，30 分鐘）→ 週三至隔週三移植與回歸 → 隔週四併入 develop。健保署月初／季初的大改版（例如支付標準、申報格式）另開專案性批次。</li>
+    <li><strong>移植規則</strong>：不是逐行翻譯。若該 VB 模組在 T01 已改寫完成，則依 C# 新架構（參數化、SQL 在後端、字典取代 if-else）重做該變更；若尚未改寫，只把變更記入登錄簿並把該模組的「基準快照版本」往前推，等 T01 輪到時一次改。這樣避免同一個模組改兩次。</li>
+    <li><strong>回歸測試</strong>：兩層。第一層是 T01 建立的自動化測試；第二層是「golden output 比對」——對 262 支批次程式與批價／申報類線上程式，用同一份測試資料分別跑 VB 版與 C# 版，比對輸出（申報 XML、批價明細、報表）。這是證明「功能一致」最便宜也最有說服力的方法。</li>
+    <li><strong>凍結窗</strong>：每次上線前 30 天進入凍結，院方只允許健保強制項目與緊急修正，且必須「雙版同時上」（院方改 VB、我們同步改 C#，同一天驗證）。凍結規則要寫進「上線前檢核清單」（M01）。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>總院 HIS 每月變更量<strong>規格未載明，需確認</strong>。以一套 3,900 支程式、服務兩院區、每月配合健保署與使用單位的中大型 HIS 推估，合理範圍是每月 30–80 筆程式異動加上數筆 DDL。假設平均 50 筆／月、每筆移植加回歸平均 0.5 人日，即每月約 25 人日，再加 triage、登錄簿維護、golden output 環境維護與與院方溝通，需要常駐 2 人；時期 A 約 10 個月、時期 B 約 11 個月（合併衝突比移植便宜但老醫功能會擴大衝突面），取 18 個月 × 2 人 = 36 人月。若院方變更量是每月 150 筆以上，這個數字要翻倍，而且 T01 的估算也會跟著錯，所以「近 12 個月上版紀錄」是 P0 的資料。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>健保署公告的節奏與衝擊面</strong>：支付標準、藥價基準、申報格式（XML 格式版本）、IC 卡 API 版本、慢箋規則等，多數有法定生效日，不能延後。同步小組要有人看得懂健保公告並判斷影響哪些子系統（門急診健保系統、住院健保、藥局、批價）。</li>
+    <li><strong>看得懂 15 年 VB.Net 舊碼的意圖</strong>：院方上版單通常只寫「配合 XX 科需求調整」，真正的邏輯要從 diff 裡讀出來。院方的 commit 粒度與註解品質<strong>未確認</strong>，若他們是整包覆蓋而非逐檔 commit，diff 會很難讀。</li>
+    <li><strong>共用 DB 的 schema 演進</strong>：VB 與 C# 在時期 A 共用同一顆 DB（否則無法 golden output 比對，也無法 Phase-1 上線）。院方新增欄位、改型別、改 stored procedure，都要在我們的 C# 資料存取層即時反映。</li>
+    <li><strong>院方團隊的工作方式</strong>：這是流程依賴，不是技術問題。若院方 HIS 組沒有指定窗口、沒有固定上版日、變更不留紀錄，我們的節奏就建不起來。</li>
+    <li><strong>時期 B 的「誰在改 C#」問題</strong>：Phase-1 上線後總院增修必須做在 C# 上。若院方要自己改，M02 技術移轉得提前到第 300 天前完成，而且 code review 權要留在我們這邊直到 630 天驗收；若全由我們改，這部分是不是計價範圍要在合約釐清（規格沒寫）。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T01.html">T01</a> — 同步是把院方變更移植到 T01 改寫後的模組上；T01 的改寫順序與「基準快照」版本決定每筆變更是立即移植還是延後。T01 的自動化測試也是本任務回歸測試的第一層。</li>
+    <li><a href="./M01.html">M01</a> — 同步流程、變更登錄簿格式、凍結規則都必須寫進工作計畫書（得標 20 天內）並納入變更管理程序，否則對院方沒有約束力。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T06.html">T06</a> — Phase-1 上線的前提是 C# 版功能追平 VB.Net 正式版；凍結窗與登錄簿「全數已回歸」是上線前檢核清單的一項。</li>
+    <li><a href="./T16.html">T16</a> — 老醫版本回饋成醫／斗六時，主線上的總院增修必須已合併進老醫分支，否則回饋等於倒退。</li>
+    <li><a href="./T02.html">T02</a>／<a href="./T03.html">T03</a>／<a href="./T04.html">T04</a> — 間接：院方若在期間新增設定表或檢核規則，參數化與檢核引擎的設計要能吸收。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>本任務不直接介接硬體。但院方的變更裡若含健保 IC 卡讀卡機 API 版本升級（健保署不定期更新 CSHIS DLL）或印表機／標籤機格式調整，會透過本流程進入 C# 版，需要對應的測試設備（見 T06 的 client 環境）。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>院方版本庫（TFS／SVN／Git，未確認）</td><td>唯讀存取、diff</td><td>資訊室 HIS 組</td><td>唯讀帳號、VPN 或院內工作站</td></tr>
+      <tr><td>健保 IC 卡 API（間接）</td><td>CSHIS DLL 版本</td><td>健保署</td><td>測試用讀卡機與測試卡（由 T06 準備）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>院方 VB.Net 版本庫的<strong>唯讀存取</strong>（含歷史）與版本庫類型說明</td><td>資訊室 HIS 組</td><td>沒有 repo diff 就只能靠口頭或上版單得知變更，一定會漏。也是 T01 基準快照的來源。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>近 12 個月的<strong>上版紀錄／變更單</strong>（每筆的程式清單、DB 異動、原因）</td><td>資訊室 HIS 組</td><td>用來估變更量與人力；沒有這份，36 人月是猜的，T01 估算也不可靠。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>院方指派<strong>具名同步窗口</strong>（HIS 組一人 + 代理人），並同意雙週 triage 會議</td><td>資訊室 HIS 組主管、專案管理人</td><td>流程依賴的核心；沒有窗口，登錄簿沒人簽認、凍結沒人執行。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方現行<strong>上版流程文件</strong>：上版日、審核流程、DDL 誰能執行、緊急上版規則</td><td>資訊室 HIS 組、DC 組</td><td>我們的節奏要對齊他們的上版日；DDL 若無審核流程，共用 DB 隨時會被改。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td><strong>DB schema 異動通知機制</strong>（DDL trigger／schema 版本表／每週 schema dump 皆可）</td><td>資訊室 DC 組（DBA）</td><td>程式 diff 看不到 DDL；沒有通知，C# 資料層會在測試時才發現欄位不對。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>合約層級確認：<strong>凍結窗規則</strong>（上線前 30 天）與「雙版同時上」義務</td><td>專案管理人、採購組</td><td>規格未載明；沒有書面約定，院方在上線前一週上大改版我們無法拒絕。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>時期 B 的分工決定：Phase-1 上線後總院增修由誰在 C# 上實作、是否計價</td><td>資訊室主管、採購組</td><td>影響 M02 時程與我們 300–630 天的人力；規格未載明。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>流程依賴院方團隊</strong> — 規格未給任何機制，成敗取決於院方 HIS 組是否願意配合固定節奏、留紀錄、指派窗口。這不是我們能單方面解決的，要在工作計畫書簽認階段就談定。</li>
+    <li><strong>變更量未知</strong> — 每月 30 筆與 150 筆是完全不同的專案；後者會吃掉 T01 的人力並讓 300 天上線不可能。</li>
+    <li><strong>共用 DB 的隱形變更</strong> — DDL 與設定表異動不在程式 diff 中，是最常造成「測試環境突然壞掉」的來源。</li>
+    <li><strong>健保署強制時程壓過凍結窗</strong> — 健保改版有法定生效日，凍結窗擋不住；只能靠 dual-ship 與縮小影響範圍。</li>
+    <li><strong>院方 commit 品質</strong> — 若院方版本庫是整包覆蓋、無註解，diff 的可讀性極低，移植成本會加倍。</li>
+    <li><strong>時期 B 雙軌開發衝突</strong> — 300 天後總院增修與老醫功能同時在 C# 上進行，若沒有嚴格分支模型與 code owner 制度，回饋版本會帶入回歸。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>院方版本庫是什麼（TFS／SVN／Git／檔案伺服器）？commit 粒度為何？可否給我們唯讀帳號？</li>
+    <li>總院 HIS 平均每月上版幾次、每次幾支程式、幾筆 DDL？健保改版高峰月是幾月？</li>
+    <li>院方是否有正式的變更單系統？格式能否匯出？</li>
+    <li>斗六分院是否與成醫共用同一顆 DB 與同一份程式，還是有獨立分支？（影響 diff 來源是一個還是兩個）</li>
+    <li>Phase-1 上線後，總院增修由院方在 C# 上做、還是全部交我們？是否額外計價？code review 權責？</li>
+    <li>凍結窗長度（我們提 30 天）與例外規則，院方能否接受並寫入工作計畫書？</li>
+    <li>golden output 比對需要的測試資料集（去識別化病歷、批價、申報），院方可否提供，或由我們在測試環境生成？涉及個資（伍-一-5）。</li>
+    <li>本機端獨立程式（規格說「之後盤點」）的變更是否也納入同步？由誰通知？</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>

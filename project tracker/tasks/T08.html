@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T08 數據整合中台 — HIS 多院區規劃 Tracker</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a href="../index.html">← 總覽</a>
+  <span class="crumb">Phase 2 · platform</span>
+</nav>
+<main class="page">
+<header class="task-header">
+  <div class="task-id">T08</div>
+  <h1>數據整合中台</h1>
+  <p class="lede">Phase 2 的技術基石。規格要求用 CDC／MQ／Replication 把各院區 HIS 的掛號、床位、排程、手術、檢驗、供膳等資料即時供應到一個讀取層，讓跨院查詢（T09–T14）不直接打核心 HIS 資料庫，達到讀寫分離；同時要有清檔機制，並銜接成大的住院健檢歷史資料，未來擴充 Dashboard／Analytics。規格只給了三個技術名詞，沒有給資料庫引擎、資料量、拓樸，所有架構決策都要先問。</p>
+  <div class="meta-grid">
+    <div class="meta"><span class="k">階段</span><span class="v">Phase 2 · 540 天內（平台核心應在 Phase 2 前 6 個月可用）</span></div>
+    <div class="meta"><span class="k">硬體介接</span><span class="v hw-no">無（但需 DC 組提供伺服器）</span></div>
+    <div class="meta"><span class="k">領域難度</span><span class="v"><span class="dots d3"></span> 3/5</span></div>
+    <div class="meta"><span class="k">技術難度</span><span class="v"><span class="dots d5"></span> 5/5</span></div>
+    <div class="meta"><span class="k">預估工作量</span><span class="v">約 24 人月</span></div>
+    <div class="meta"><span class="k">依賴</span><span class="v"><a href="./T02.html">T02</a> <a href="./T07.html">T07</a></span></div>
+    <div class="meta"><span class="k">被依賴</span><span class="v"><a href="./T09.html">T09</a> <a href="./T10.html">T10</a> <a href="./T11.html">T11</a> <a href="./T12.html">T12</a> <a href="./T13.html">T13</a> <a href="./T14.html">T14</a> <a href="./T15.html">T15</a></span></div>
+    <div class="meta"><span class="k">規格依據</span><span class="v">貳-一-(二)-7、貳-二-(三)、貳-一-(五)-1、伍-一-8</span></div>
+  </div>
+</header>
+
+<section id="spec">
+  <h2>規格原文依據</h2>
+  <blockquote>
+    <p>貳-一-(二)-7 數據整合中台：「配合跨院區作業查詢需求，透過資料即時供應機制（例如 CDC、MQ 或 Replication）提升資料即時性與效能，保護核心 HIS 資料庫並達到讀寫分離，後續可支援 Dashboard、Analytics Application 等加值應用。」</p>
+    <ul>
+      <li>「跨院資源共享：掛號資訊、床位資訊、檢查科室儀器排程、開刀房手術排程、檢驗抽血、營養供膳等。」</li>
+      <li>「需有清檔規劃機制。」</li>
+      <li>「能銜接原本在成大醫院的住院健檢資料（帶出受檢者歷年受檢資料與報告為住院健檢系統原有核心功能）。」</li>
+    </ul>
+    <p>貳-二-(三)：「本院會提供本案所需的軟硬體環境及周邊平台相關資料予得標廠商。」貳-一-(五)-1：「資訊室 DC 組統籌伺服器安裝與建置，上線前另建置一組對應環境供測試。」</p>
+  </blockquote>
+  <p>規格未載明：資料庫引擎與版本、各院區是否各自一套 DB、資料量、跨院網路、即時性目標（秒級或分鐘級）、中台由誰維運。全部需確認。</p>
+</section>
+
+<section id="sketch">
+  <h2>我們預期的系統樣貌</h2>
+  <p>原則：中台是<strong>唯讀</strong>的。跨院「查詢」走中台；跨院「辦理」（掛號、預約、轉檢申請）不經中台寫入，而是呼叫擁有該資料的院區 HIS 後端服務（C#／WCF over HTTPS，T04）寫入該院核心 DB，再由 CDC 把結果流回中台。這就是讀寫分離的具體意義，也是避免中台變成第二個真相來源的關鍵。</p>
+  <pre class="diagram">
+  成大醫院                        斗六分院                        老人醫院
+┌───────────────┐            ┌───────────────┐            ┌───────────────┐
+│ 核心 HIS DB    │            │ 核心 HIS DB    │            │ 核心 HIS DB    │   ← 寫入只發生在這裡
+│ (OLTP, 引擎?)  │            │ (是否獨立? 未知) │            │ (獨立? 未知)   │      經各院 HIS 後端服務
+└──────┬────────┘            └──────┬────────┘            └──────┬────────┘
+       │ CDC / Transactional Replication (log-based，不加 trigger、不動 3,647 支程式)
+       ▼                            ▼                            ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Capture / Publisher（每院一組，落在該院 DC）                                 │
+│  · 只訂閱共享資料域的表：掛號、床位、檢查排程、手術排程、檢驗抽血、供膳、健檢     │
+│  · 打上 院區代碼(T02) + 異動序號 + 時間戳                                   │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               ▼  MQ（RabbitMQ 或 Kafka；topic = 院區.資料域）
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Consumer / Loader（冪等 upsert，依異動序號去重、可重播）                       │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ 中台讀取庫 ODS（統一 schema，PK 含院區代碼）        ┌────────────────────┐    │
+│  掛號 │ 床位 │ 檢查排程 │ 手術排程 │ 檢驗 │ 供膳    │ 住院健檢歷史（成大） │    │
+│                                                └────────────────────┘    │
+│  清檔排程：依資料域保存年限 purge／歸檔；MQ 訊息 7–14 天                      │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               ▼
+┌───────────────────────┐   ┌──────────────────────┐   ┌────────────────────┐
+│ 中台查詢 API (C#)       │──▶│ 跨院畫面 T09–T14      │   │ 未來：Dashboard／   │
+│ 只讀、分頁、快取、稽核   │   │ (查詢走中台，辦理走   │   │ Analytics（本案不做）│
+└───────────────────────┘   │  各院 HIS 後端服務)   │   └────────────────────┘
+                            └──────────────────────┘
+  </pre>
+  <h3>元件與資料流</h3>
+  <ul>
+    <li><strong>擷取層。</strong>假設核心 DB 是 SQL Server（VB.Net + WCF 的 2011 年系統極可能，但規格未載明），首選 SQL Server CDC（log-based，對 OLTP 影響小，不用改任何一支 HIS 程式）。若版本／版次不支援 CDC（2016 SP1 前的 Standard 不支援），退而用 Transactional Replication 直接複寫到讀取庫，犧牲轉換彈性。若是 Oracle 則改用 LogMiner／GoldenGate 類工具，成本大不同，這就是為什麼引擎版本是 P0。</li>
+    <li><strong>訊息層。</strong>MQ 的用途是解耦與緩衝：院區間網路斷線時訊息留在 queue，恢復後補齊；也讓多個消費者（ODS、未來 Analytics）訂閱同一份異動。不要為了規格上寫的三個詞全部都做——CDC + MQ 一組、或 Replication 單獨一組，二選一。</li>
+    <li><strong>ODS 讀取庫。</strong>統一 schema，主鍵一律含院區代碼（沿用 T02 的院區參數）。三院的表結構在 Phase 1 後理論上一致，但 Phase 2 期間總院持續增修（T05）會讓 schema 漂移，中台 loader 要能容忍多欄位。</li>
+    <li><strong>查詢 API。</strong>C# 服務，只讀，有分頁與快取，所有查詢寫存取紀錄（伍-三-6、伍-一-8 保存 5 年）。跨院看病人資料屬跨機構個資利用，API 要帶目的與操作者。</li>
+    <li><strong>清檔機制。</strong>依資料域訂保存年限：掛號／床位／排程異動明細短期（例如 2 年），住院健檢歷史依「歷年受檢資料」需求永久保留（或依病歷保存年限）。清檔是排程作業加歸檔，不是單純 delete。</li>
+    <li><strong>住院健檢歷史。</strong>「帶出受檢者歷年受檢資料與報告」代表要把成大現有住院健檢系統的資料（含報告檔，可能是 PDF／影像）搬到或連到中台，讓老醫端可讀。報告檔在哪、多大、格式為何，規格未載明。</li>
+    <li><strong>即時性目標（我方提案，待院方確認）。</strong>床位／掛號 ≤ 10 秒；檢查與手術排程 ≤ 60 秒；供膳統計每日批次即可；健檢歷史一次轉置加每日增量。</li>
+  </ul>
+  <h3>工作量怎麼估的</h3>
+  <p>平台骨幹（CDC 設定、MQ、loader、監控、重播、環境）約 8 人月；六個共享資料域各約 2 人月（schema 對映、資料清洗、查詢 API、測試）合計 12 人月；清檔機制與住院健檢歷史轉置約 4 人月。共 24 人月，前提是 DB 是 SQL Server 且 DC 組能在 Phase 2 前 2 個月給環境。若引擎不是 SQL Server 或三院 DB 拓樸複雜（例如斗六與總院共用一套 DB 但老醫獨立），加 30%。</p>
+</section>
+
+<section id="domain">
+  <h2>需要的領域知識與難點</h2>
+  <ul>
+    <li><strong>HIS 資料模型。</strong>掛號、床位、排程、手術、檢驗、供膳六個資料域橫跨門診／住院約 20 個子系統的表；要知道哪些表是主檔、哪些是異動、狀態欄位怎麼解讀（例如床位「佔床／待清／保留」在總院是怎麼表示的）。沒有資料字典就是逆向工程。</li>
+    <li><strong>CDC／Replication 的運維知識。</strong>log 保留、cleanup job、schema change 對 capture instance 的影響、initial snapshot 對 OLTP 的鎖定影響。HIS 不能中斷（貳-三-4），初始快照必須在離峰做。</li>
+    <li><strong>個資與跨機構資料利用。</strong>若老醫是獨立醫事機構，跨院查病人資料涉及個資法目的外利用與醫療法病歷調閱規範；中台的存取紀錄與授權設計要對得上 M03 的防護需求等級評估。</li>
+    <li><strong>最終一致性的產品設計。</strong>使用者在跨院畫面看到的床位是「幾秒前」的狀態，辦理時要回到擁有院 HIS 再檢核一次。這個「先查後辦、辦時再驗」的模式要讓 T09–T12 的設計者理解，否則會出現在中台上看到空床、實際去辦已被佔的情況。</li>
+  </ul>
+</section>
+
+<section id="deps">
+  <h2>依賴關係</h2>
+  <h3>前置任務</h3>
+  <ul>
+    <li><a href="./T02.html">T02</a> — 院區代碼與院區設定表是中台所有資料的分割鍵；T02 定義的 PUB_Config／新設定表也是中台判斷「哪個院區擁有哪筆資料」的依據。</li>
+    <li><a href="./T07.html">T07</a> — 共享資料域的細部範圍（例如檢查排程要到儀器層級還是科室層級）由基準文件決定；平台骨幹可以先做，資料域範圍要等 T07。</li>
+    <li>（環境依賴，非任務）DC 組伺服器與測試環境：規格把它放在 <a href="./T15.html">T15</a>（貳-一-(五)-1），但中台在 Phase 2 就需要，必須提前向 DC 組要。</li>
+  </ul>
+  <h3>依賴本任務的任務</h3>
+  <ul>
+    <li><a href="./T09.html">T09</a> 掛號、<a href="./T10.html">T10</a> 床位、<a href="./T11.html">T11</a> 手術排程、<a href="./T12.html">T12</a> 檢查排程、<a href="./T13.html">T13</a> 供膳統計、<a href="./T14.html">T14</a> 轉檢代檢 — 全部的跨院「查詢」面都從中台讀。</li>
+    <li><a href="./T15.html">T15</a> — 老醫上線環境要含中台的正式與測試環境；住院健檢歷史轉置是資料轉置的一部分。</li>
+    <li><a href="./M03.html">M03</a> — 中台是新增的資通系統，需要納入防護需求等級評估與弱掃。</li>
+  </ul>
+</section>
+
+<section id="hardware">
+  <h2>硬體／外部設備介接</h2>
+  <p>無。中台是純軟體平台。但它需要新的基礎設施：每院一組 capture 節點、MQ 叢集、ODS 資料庫伺服器、查詢 API 伺服器，正式與測試各一套。規格明訂伺服器由 DC 組統籌（貳-一-(五)-1），本案不採購硬體，但我們要提出規格需求（CPU／RAM／磁碟／網路）並在 Phase 2 初就要到。</p>
+  <table>
+    <thead><tr><th>設備／系統</th><th>協定／介面</th><th>誰提供 SDK 或規格</th><th>測試需要什麼</th></tr></thead>
+    <tbody>
+      <tr><td>各院核心 HIS 資料庫（來源）</td><td>SQL Server CDC／Replication（假設；引擎未確認）</td><td>資訊室 HIS 組（schema、帳號）、DC 組（DB 管理權限）</td><td>具備 CDC 權限的測試 DB 複本、離峰初始快照窗口</td></tr>
+      <tr><td>MQ 叢集、ODS DB、API 伺服器</td><td>AMQP／Kafka、TDS、HTTPS</td><td>DC 組提供 VM／授權；我方提出規格</td><td>Phase 2 起 2 個月內測試環境，跨院網路開通</td></tr>
+      <tr><td>成大住院健檢系統資料與報告檔</td><td>DB 直讀或匯出；報告檔為檔案系統／PDF（未確認）</td><td>資訊室 HIS 組、住院健檢單位</td><td>歷史資料樣本與去識別化測試集</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="asks">
+  <h2>需要緊急向院方／原廠取得</h2>
+  <table class="asks">
+    <thead><tr><th>優先</th><th>要什麼</th><th>向誰要</th><th>為什麼／沒有會怎樣</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pri p0">P0</span></td><td>核心 HIS 資料庫引擎、版本、版次（Enterprise／Standard）、HA 架構、目前是否已啟用 CDC／Replication／Always On</td><td>資訊室 DC 組、HIS 組</td><td>決定擷取技術與授權成本；SQL Server Standard 舊版無 CDC，Oracle 則工具與費用完全不同。沒有這個答案，架構無法定案。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>三院 DB 拓樸：斗六與總院是否同一套 DB、老醫是否獨立 DB、跨院網路頻寬與延遲、防火牆規則</td><td>資訊室 DC 組</td><td>若三院共用一套 DB，中台只剩讀寫分離；若各自獨立，才需要跨院匯流。兩者工作量差一倍。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>六個共享資料域的資料字典／ERD、主要表的資料量與日增量、狀態碼定義</td><td>資訊室 HIS 組</td><td>沒有資料字典就得逆向 3,647 支程式找表；資料量決定 ODS 與 MQ 的容量規劃。</td></tr>
+      <tr><td><span class="pri p0">P0</span></td><td>中台測試與正式環境（VM、儲存、MQ 授權、DB 授權）的提供時程，提前於 T15</td><td>資訊室 DC 組</td><td>規格把環境放在 Phase 3 的 T15；中台若等到那時，T09–T14 在 Phase 2 沒有東西可以測。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>住院健檢系統的資料模型、報告檔存放位置與格式、歷史資料量（年數、人次、檔案大小）</td><td>資訊室 HIS 組、住院健檢單位</td><td>「銜接歷史資料」的範圍完全取決於此；報告若是掃描影像，儲存與傳輸設計不同。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>院方既有的 DW／BI／ETL 平台與其資料流（若有）</td><td>資訊室</td><td>避免蓋第二套；若院方已有 DW 抽核心 DB，CDC 可與之共用 capture，減少對 OLTP 的負擔。</td></tr>
+      <tr><td><span class="pri p1">P1</span></td><td>各資料域的保存年限與清檔規則（病歷保存、稽核紀錄 5 年）</td><td>病歷室、資安組、資訊室</td><td>清檔機制是驗收項目；規則由院方定，我們只實作。</td></tr>
+      <tr><td><span class="pri p2">P2</span></td><td>中台上線後的維運分工（誰看 MQ 監控、誰處理延遲告警）與納入 M03 防護等級評估的時程</td><td>資訊室 DC 組、資安組</td><td>保固期 SLA（M04）緊急 2 小時含中台；分工不清會全部算到我們頭上。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="blockers">
+  <h2>主要阻礙與風險</h2>
+  <ul>
+    <li><strong>來源 DB 未知</strong> — 引擎、版本、拓樸皆規格未載明。這是投標估價最大的不確定項，也是 Phase 2 第一週就要解掉的事。</li>
+    <li><strong>環境給得太晚</strong> — 規格把伺服器建置放在 Phase 3 T15；中台在 Phase 2 前段就要有環境。若 DC 組依規格時程給，T09–T14 全部延後。</li>
+    <li><strong>schema 漂移</strong> — Phase 2 期間總院 HIS 持續增修（T05），共享資料域的表會改；CDC capture instance 遇到 schema change 需要重建。要在 T05 的合併流程加一道「中台影響評估」。</li>
+    <li><strong>初始快照對 OLTP 的衝擊</strong> — HIS 不能中斷。大表初始同步要在離峰、分批，且要院方核准時段。</li>
+    <li><strong>中台被當成寫入路徑</strong> — 若 T09–T12 的設計者圖方便直接寫中台，讀寫分離就破功且會出現雙重真相。必須在架構規範中明文禁止並在 code review 把關。</li>
+    <li><strong>個資與跨機構利用</strong> — 老醫若為獨立機構，中台等於跨機構病人資料流通，需法遵設計（授權、目的、紀錄）；M03 的防護等級若被評為高，控制措施成本上升。</li>
+    <li><strong>「Dashboard／Analytics 擴充」的範圍解讀</strong> — 規格說「後續可支援」，我們解讀為本案只留擴充點不做應用；需在 T07 基準文件白紙黑字寫成 Out-of-scope。</li>
+  </ul>
+</section>
+
+<section id="questions">
+  <h2>待確認問題</h2>
+  <ol>
+    <li>核心 HIS DB 是 SQL Server 嗎？版本與版次？是否已有 CDC 或 Replication 在用？</li>
+    <li>斗六分院目前與總院共用同一套 DB 還是各自一套？老人醫院規劃為獨立 DB 嗎？</li>
+    <li>院方對「即時」的期望是幾秒還是幾分鐘？是否接受最終一致性（先查後辦、辦時再驗）？</li>
+    <li>中台可否使用開源 MQ（RabbitMQ／Kafka）？院方是否有大陸原產地疑慮的軟體清單審查程序（伍-一-16）？</li>
+    <li>住院健檢報告檔的格式與存放位置？是否包含影像（例如超音波、X 光）而需與 PACS（H04）連動？</li>
+    <li>清檔規則由誰訂？是否需要歸檔而非刪除？稽核紀錄是否比照伍-一-8 保存 5 年？</li>
+    <li>中台正式上線後由誰維運？保固期間的 SLA 是否涵蓋 MQ 延遲這類非「系統無法使用」的事件？</li>
+    <li>Dashboard／Analytics 是否確定不在本案範圍？若院方期待至少一個示範 Dashboard，需在基準文件寫明。</li>
+  </ol>
+</section>
+</main>
+<footer class="foot">HIS 多院區規劃 · 內部工作文件 · 依據 02-規格表(含需求說明書) V9</footer>
+</body>
+</html>
